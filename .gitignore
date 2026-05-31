@@ -14,14 +14,20 @@ data/espn_odds_cache.json
 # ── Scanner output (regenerated at runtime) ───────────────────────────────────
 output/
 
-# ── Large data / model files (too big for GitHub free tier) ──────────────────
+# ── Raw data (too large) ──────────────────────────────────────────────────────
 data/tennis/raw/
 data/nba/raw/
 data/mlb/raw/
 data/wnba/raw/
-data/*/processed/*.csv
-data/*/processed/*.parquet
-models/
+
+# ── NBA training data (464MB — too large for GitHub) ─────────────────────────
+data/nba/processed/
+
+# ── Model files — committed so Streamlit Cloud can run AI scanners ────────────
+# (all individual files are <5MB, total ~178MB)
+
+# ── Large tennis training CSV (1.5GB) — player_cache.parquet is used instead ─
+data/tennis/processed/training_dataset.csv
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

@@ -1114,12 +1114,15 @@ def _empty(msg="No data yet — click the button above to run."):
 # ── NBA session (cached for the process lifetime) ─────────────────────────────
 @st.cache_resource(show_spinner=False)
 def _nba_session():
-    from src.sports.nba.scanner import load_data, load_models, auto_refresh_data, refresh_injuries
-    refresh_injuries()
-    df = load_data()
-    if df is not None:
-        df = auto_refresh_data(df)
-    return df, load_models()
+    try:
+        from src.sports.nba.scanner import load_data, load_models, auto_refresh_data, refresh_injuries
+        refresh_injuries()
+        df = load_data()
+        if df is not None:
+            df = auto_refresh_data(df)
+        return df, load_models()
+    except Exception:
+        return None, {}
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _fetch_nba_pp_board():
