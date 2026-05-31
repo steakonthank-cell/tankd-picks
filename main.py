@@ -1,0 +1,157 @@
+"""
+sports_ev_bot - Multi-Sport Entry Point
+
+Interactive menu system for NBA, Tennis, CBB, and upcoming sports betting analysis.
+
+Features:
+    - Sport selection menu
+    - Separate workflows for each sport
+    - Shared core functionality (FanDuel, PrizePicks APIs)
+    
+Sports Supported:
+    - NBA    (Professional Basketball)  - ACTIVE
+    - Tennis (ATP + WTA)                - ACTIVE
+    - MLB    (Major League Baseball)    - ACTIVE
+    - WNBA   (Women's Basketball)       - ACTIVE
+    - CBB    (College Basketball)       - COMING SOON
+    - NFL    (Football)                 - COMING SOON
+
+Usage:
+    $ python main.py
+    
+Then select your sport and follow the prompts.
+"""
+
+import sys
+import os
+
+# Ensure project root is on path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+def main():
+    """
+    Main entry point - Sport selection menu.
+    
+    Workflow:
+        1. Display sport menu
+        2. User selects sport
+        3. Launch sport-specific CLI
+        4. Return to sport menu (or exit)
+    """
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
+        print("\n" + "=" * 50)
+        print("   SPORTS ANALYTICS HUB")
+        print("=" * 50)
+        
+        print("\n1. NBA")
+        print("   21 models  |  PTS, REB, AST, FGA, FG3A, PRA, and more")
+
+        print("\n2. Tennis")
+        print("   7 models   |  ATP + WTA")
+
+        print("\n3. MLB")
+        print("   10 models  |  Hits, TB, HR, RBI, R, K, ER, OUTS, and more")
+
+        print("\n4. WNBA")
+        print("   16 models  |  XGBoost AI projections + PickFinder signal + player search")
+
+        print("\n5. Moneylines")
+        print("   Best team moneylines  |  NBA + MLB + WNBA combined")
+
+        print("\n" + "-" * 50)
+        print("0. Exit")
+        print("-" * 50)
+        
+        choice = input("\nSelect Sport: ").strip()
+        
+        # ================================================================
+        # ACTIVE SPORTS
+        # ================================================================
+
+        if choice == '1':
+            try:
+                from src.cli.nba_cli import main_menu as nba_menu
+                nba_menu()
+            except ImportError as e:
+                print(f"\nError loading NBA module: {e}")
+                input("\nPress Enter to continue...")
+            except Exception as e:
+                print(f"\nNBA module error: {e}")
+                input("\nPress Enter to continue...")
+
+        elif choice == '2':
+            try:
+                from src.cli.tennis_cli import main_menu as tennis_menu
+                tennis_menu()
+            except ImportError as e:
+                print(f"\nError loading Tennis module: {e}")
+                input("\nPress Enter to continue...")
+            except Exception as e:
+                print(f"\nTennis module error: {e}")
+                input("\nPress Enter to continue...")
+
+        elif choice == '3':
+            try:
+                from src.cli.mlb_cli import main_menu as mlb_menu
+                mlb_menu()
+            except ImportError as e:
+                print(f"\nError loading MLB module: {e}")
+                input("\nPress Enter to continue...")
+            except Exception as e:
+                print(f"\nMLB module error: {e}")
+                input("\nPress Enter to continue...")
+
+        elif choice == '4':
+            try:
+                from src.cli.wnba_cli import main_menu as wnba_menu
+                wnba_menu()
+            except ImportError as e:
+                print(f"\nError loading WNBA module: {e}")
+                input("\nPress Enter to continue...")
+            except Exception as e:
+                print(f"\nWNBA module error: {e}")
+                input("\nPress Enter to continue...")
+
+        elif choice == '5':
+            try:
+                import os
+                from dotenv import load_dotenv
+                load_dotenv()
+                api_key = os.getenv('ODDS_API_KEY')
+                from src.core.moneylines import run_moneylines_scanner
+                run_moneylines_scanner(api_key=api_key)
+            except ImportError as e:
+                print(f"\nError loading Moneylines module: {e}")
+                input("\nPress Enter to continue...")
+            except Exception as e:
+                print(f"\nMoneylines error: {e}")
+                import traceback; traceback.print_exc()
+                input("\nPress Enter to continue...")
+
+        # ================================================================
+        # EXIT
+        # ================================================================
+        
+        elif choice == '0':
+            print("\nGoodbye.\n")
+            break
+        
+        else:
+            print("\nInvalid selection.")
+            input("Press Enter to try again...")
+
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nInterrupted. Goodbye.\n")
+    except Exception as e:
+        print(f"\nCritical error: {e}")
+        print("Please report this issue if it persists.")

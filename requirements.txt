@@ -1,0 +1,17 @@
+streamlit==1.41.0
+pandas
+numpy
+requests
+python-dotenv
+xgboost
+lightgbm
+scikit-learn
+pyarrow
+nba_api
+python-Levenshtein
+fuzzywuzzy
+RapidFuzz
+beautifulsoup4
+lxml
+pytz
+tzdata

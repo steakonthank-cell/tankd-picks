@@ -1,0 +1,60 @@
+REC,NAME,TARGET,SURFACE,AI,PP,EDGE,RANK,PF_HR10,PF_STRK
+🔴 UNDER (-1.70),Nuno Borges,bp_won,Clay,1.8,3.5,-1.7,?,30,2
+🔴 UNDER (-7.52),Nuno Borges,games_won,Clay,9.98,17.5,-7.52,?,-1,0
+🔴 UNDER (-4.18),Andrey Rublev,bp_won,Clay,1.32,5.5,-4.18,?,20,-1
+🔴 UNDER (-12.10),Andrey Rublev,total_games,Clay,24.4,36.5,-12.1,?,10,-1
+🔴 UNDER (-10.04),Andrey Rublev,games_won,Clay,10.46,20.5,-10.04,?,-1,0
+🔴 UNDER (-0.87),Andrey Rublev,double_faults,Clay,2.63,3.5,-0.87,?,10,-1
+🔴 UNDER (-1.98),Marta Kostyuk,bp_won,Clay,3.02,5.0,-1.98,?,80,2
+🟢 OVER  (+4.07),Marta Kostyuk,total_games,Clay,22.07,18.0,4.07,?,50,1
+🔴 UNDER (-3.74),Xiyu Wang,bp_won,Hard,1.26,5.0,-3.74,?,80,8
+🔴 UNDER (-18.91),Thiago Agustin Tirante,total_games,Clay,18.59,37.5,-18.91,?,20,2
+🔴 UNDER (-13.38),Thiago Agustin Tirante,games_won,Clay,7.12,20.5,-13.38,?,-1,0
+🔴 UNDER (-8.99),Pablo Carreno Busta,games_won,Clay,9.51,18.5,-8.99,?,-1,0
+🟢 OVER  (+3.31),Viktorija Golubic,games_won,Clay,9.31,6.0,3.31,?,-1,0
+🔴 UNDER (-1.42),Iga Swiatek,bp_won,Clay,3.58,5.0,-1.42,?,90,3
+🟢 OVER  (+7.34),Iga Swiatek,total_games,Clay,24.34,17.0,7.34,?,50,1
+🔴 UNDER (-1.60),Alex Michelsen,aces,Clay,2.9,4.5,-1.6,?,50,2
+🔴 UNDER (-1.65),Alex Michelsen,bp_won,Clay,1.85,3.5,-1.65,?,50,3
+🔴 UNDER (-3.87),Alex Michelsen,games_won,Clay,10.63,14.5,-3.87,?,-1,0
+🔴 UNDER (-10.63),Rafael Jodar,total_games,Clay,23.87,34.5,-10.63,?,10,1
+🔴 UNDER (-7.89),Rafael Jodar,games_won,Clay,11.61,19.5,-7.89,?,-1,0
+🔴 UNDER (-0.07),Rafael Jodar,total_tiebreaks,Clay,0.43,0.5,-0.07,?,-1,0
+🔴 UNDER (-2.65),Karolina Muchova,bp_won,Clay,2.35,5.0,-2.65,?,40,2
+🟢 OVER  (+1.83),Karolina Muchova,total_games,Clay,20.83,19.0,1.83,?,60,-1
+🟢 OVER  (+6.30),Jil Teichmann,games_won,Clay,13.3,7.0,6.3,?,-1,0
+🟢 OVER  (+6.40),Sorana Cirstea,total_games,Clay,26.9,20.5,6.4,?,40,-5
+🟢 OVER  (+0.77),Solana Sierra,games_won,Clay,9.77,9.0,0.77,?,-1,0
+🔴 UNDER (-0.21),Marie Bouzkova,bp_won,Clay,2.29,2.5,-0.21,?,80,4
+🟢 OVER  (+2.54),Marie Bouzkova,games_won,Clay,10.04,7.5,2.54,?,-1,0
+🔴 UNDER (-3.80),Mirra Andreeva,total_games,Clay,15.2,19.0,-3.8,?,70,1
+🔴 UNDER (-2.85),Karen Khachanov,bp_won,Clay,2.15,5.0,-2.85,?,20,2
+🔴 UNDER (-9.15),Karen Khachanov,total_games,Clay,28.35,37.5,-9.15,?,10,1
+🔴 UNDER (-6.95),Karen Khachanov,games_won,Clay,13.55,20.5,-6.95,?,-1,0
+🔴 UNDER (-3.06),Jesper De Jong,bp_won,Clay,0.44,3.5,-3.06,?,80,2
+🔴 UNDER (-13.95),Jesper De Jong,games_won,Clay,4.55,18.5,-13.95,?,-1,0
+🔴 UNDER (-3.22),Alex de Minaur,bp_won,Clay,2.28,5.5,-3.22,?,10,-4
+🔴 UNDER (-8.84),Alex de Minaur,games_won,Clay,10.66,19.5,-8.84,?,-1,0
+🔴 UNDER (-2.60),Jakub Mensik,bp_won,Clay,0.4,3.0,-2.6,?,30,2
+🔴 UNDER (-11.33),Jakub Mensik,games_won,Clay,5.17,16.5,-11.33,?,-1,0
+🔴 UNDER (-0.04),Tamara Korpatsch,games_won,Clay,5.96,6.0,-0.04,?,-1,0
+🔴 UNDER (-1.29),Tommy Paul,aces,Clay,4.21,5.5,-1.29,?,10,-1
+🔴 UNDER (-7.84),Tommy Paul,games_won,Clay,10.66,18.5,-7.84,?,-1,0
+🔴 UNDER (-1.53),Joao Fonseca,bp_won,Clay,1.97,3.5,-1.53,?,30,2
+🔴 UNDER (-5.10),Joao Fonseca,games_won,Clay,13.4,18.5,-5.1,?,-1,0
+🔴 UNDER (-3.57),Novak Djokovic,bp_won,Clay,1.43,5.0,-3.57,?,40,2
+🔴 UNDER (-13.14),Novak Djokovic,total_games,Clay,25.36,38.5,-13.14,?,30,2
+🔴 UNDER (-7.75),Novak Djokovic,games_won,Clay,12.75,20.5,-7.75,?,-1,0
+🔴 UNDER (-5.36),Novak Djokovic,aces,Clay,3.14,8.5,-5.36,?,40,2
+🔴 UNDER (-0.94),Peyton Stearns,bp_won,Clay,2.56,3.5,-0.94,?,70,2
+🔴 UNDER (-1.78),Peyton Stearns,games_won,Clay,8.22,10.0,-1.78,?,-1,0
+🔴 UNDER (-2.44),Belinda Bencic,bp_won,Clay,2.56,5.0,-2.44,?,40,1
+🟢 OVER  (+0.41),Belinda Bencic,total_games,Clay,21.41,21.0,0.41,?,50,-4
+🔴 UNDER (-2.80),Belinda Bencic,games_won,Clay,9.7,12.5,-2.8,?,-1,0
+🔴 UNDER (-3.50),Casper Ruud,bp_won,Clay,2.0,5.5,-3.5,?,20,-1
+🔴 UNDER (-16.95),Casper Ruud,total_games,Clay,20.55,37.5,-16.95,?,10,-1
+🔴 UNDER (-11.34),Casper Ruud,games_won,Clay,9.16,20.5,-11.34,?,-1,0
+🔴 UNDER (-5.64),Alexander Zverev,total_games,Clay,25.86,31.5,-5.64,?,10,-8
+🔴 UNDER (-3.24),Alexander Zverev,aces,Clay,6.26,9.5,-3.24,?,30,1
+🔴 UNDER (-1.21),Quentin Halys,games_won,Clay,11.29,12.5,-1.21,?,-1,0
+🔴 UNDER (-0.13),Quentin Halys,aces,Clay,8.37,8.5,-0.13,?,50,2

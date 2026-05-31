@@ -1,0 +1,34 @@
+# Secrets
+.streamlit/secrets.toml
+.env
+
+# Caches & generated data
+prizepicks_cache/
+fanduel_cache/
+pickfinder_cache/
+moneylines_cache/
+data/espn_odds_cache.json
+output/
+
+# Large data files
+data/tennis/raw/
+data/*/raw/
+data/*/processed/*.csv
+data/*/processed/*.parquet
+models/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
