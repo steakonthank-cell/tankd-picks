@@ -1366,11 +1366,6 @@ def _add_photos(df, player_col="Player"):
     df["Image_URL"] = df[player_col].apply(_lookup)
     return df
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
-def _metrics(sport):
-    path = os.path.join(_BASE, "models", sport, "model_metrics.csv")
-    return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
-
 # ── Render helpers ────────────────────────────────────────────────────────────
 def _show_plays(df, label, badge_color="green", hide_side=False):
     if df.empty:
