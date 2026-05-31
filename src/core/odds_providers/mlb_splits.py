@@ -19,6 +19,7 @@ import os
 import json
 import time
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------------------------------------------------------------------
 # Cache
@@ -202,55 +203,71 @@ def get_todays_splits(date_str: str = None) -> dict:
         print("   No MLB games today")
         return {}
 
-    result = {}
+    # --- Step 1: fetch all pitcher hands in parallel ---
+    pitcher_ids = set()
+    for game in games:
+        for side in ('away', 'home'):
+            p = game['teams'][side].get('probablePitcher', {})
+            if p.get('id'):
+                pitcher_ids.add(p['id'])
+
+    hand_map = {}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_pitcher_hand, pid): pid for pid in pitcher_ids}
+        for fut in as_completed(futs):
+            pid = futs[fut]
+            try:
+                hand_map[pid] = fut.result()
+            except Exception:
+                hand_map[pid] = ''
+
+    # --- Step 2: collect (batter_id, batter_name, pitcher_hand) tasks ---
+    tasks = []  # (batter_id, batter_name, pitcher_hand)
+    roster_cache = {}
 
     for game in games:
-        away_team = game['teams']['away']
-        home_team = game['teams']['home']
-        away_id   = away_team['team']['id']
-        home_id   = home_team['team']['id']
-
+        away_team    = game['teams']['away']
+        home_team    = game['teams']['home']
+        away_id      = away_team['team']['id']
+        home_id      = home_team['team']['id']
         away_pitcher = away_team.get('probablePitcher', {})
         home_pitcher = home_team.get('probablePitcher', {})
 
-        # Away pitcher faces home batters; home pitcher faces away batters
         matchups = []
-        if away_pitcher.get('id'):
-            hand = _pitcher_hand(away_pitcher['id'])
-            if hand:
-                matchups.append({'pitcher_hand': hand, 'batter_team_id': home_id,
-                                 'pitcher_name': away_pitcher.get('fullName','')})
-        if home_pitcher.get('id'):
-            hand = _pitcher_hand(home_pitcher['id'])
-            if hand:
-                matchups.append({'pitcher_hand': hand, 'batter_team_id': away_id,
-                                 'pitcher_name': home_pitcher.get('fullName','')})
+        if away_pitcher.get('id') and hand_map.get(away_pitcher['id']):
+            matchups.append((hand_map[away_pitcher['id']], home_id))
+        if home_pitcher.get('id') and hand_map.get(home_pitcher['id']):
+            matchups.append((hand_map[home_pitcher['id']], away_id))
 
-        for matchup in matchups:
-            batter_team_id = matchup['batter_team_id']
-            pitcher_hand   = matchup['pitcher_hand']
+        for pitcher_hand, batter_team_id in matchups:
+            if batter_team_id not in roster_cache:
+                try:
+                    r_roster = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
+                        params={"rosterType": "active", "season": 2026}, timeout=10)
+                    roster_cache[batter_team_id] = (
+                        r_roster.json().get('roster', []) if r_roster.status_code == 200 else []
+                    )
+                except Exception:
+                    roster_cache[batter_team_id] = []
 
-            # Get team roster
+            for p in roster_cache[batter_team_id]:
+                if p.get('position', {}).get('type') != 'Pitcher':
+                    tasks.append((p['person']['id'], p['person']['fullName'], pitcher_hand))
+
+    # --- Step 3: fetch all batter splits in parallel ---
+    result = {}
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futs = {ex.submit(_batter_splits, bid, hand): (bname, hand)
+                for bid, bname, hand in tasks}
+        for fut in as_completed(futs):
+            bname, hand = futs[fut]
             try:
-                r_roster = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
-                    params={"rosterType": "active", "season": 2026}, timeout=10)
-                if r_roster.status_code != 200:
-                    continue
-                roster = r_roster.json().get('roster', [])
+                splits = fut.result()
+                if splits:
+                    splits['hand'] = hand
+                    result[_normalize(bname)] = splits
             except Exception:
-                continue
-
-            batters = [p for p in roster
-                       if p.get('position', {}).get('type') != 'Pitcher']
-
-            for batter in batters:
-                bid  = batter['person']['id']
-                bname = batter['person']['fullName']
-                splits = _batter_splits(bid, pitcher_hand)
-                if not splits:
-                    continue
-                splits['hand'] = pitcher_hand
-                result[_normalize(bname)] = splits
+                pass
 
     print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
     _save_cache(result)
@@ -306,71 +323,70 @@ def get_defensive_matchups(date_str: str = None) -> tuple:
     batter_matchups  = {}
     pitcher_matchups = {}
 
+    # Collect all pitcher-stat and team-stat tasks, then fire in parallel
+    pitcher_stat_tasks = []   # (pitcher_id, pitcher_name, batter_team_id, batter_team_name)
+    team_stat_tasks    = []   # (pitcher_id, pitcher_name, opp_team_id, opp_team_name)
+
     for game in games:
-        away        = game['teams']['away']
-        home        = game['teams']['home']
-        away_id     = away['team']['id']
-        home_id     = home['team']['id']
-        away_name   = away['team']['name']
-        home_name   = home['team']['name']
+        away         = game['teams']['away']
+        home         = game['teams']['home']
+        away_id      = away['team']['id']
+        home_id      = home['team']['id']
+        away_name    = away['team']['name']
+        home_name    = home['team']['name']
         away_pitcher = away.get('probablePitcher', {})
         home_pitcher = home.get('probablePitcher', {})
 
-        # Home batters face the away starter
         if away_pitcher.get('id'):
-            p_stats = _pitcher_season_stats(away_pitcher['id'])
-            if p_stats:
-                try:
-                    r2 = _http.get(f"{_MLB_API}/teams/{home_id}/roster",
-                        params={"rosterType": "active", "season": 2026}, timeout=10)
-                    if r2.status_code == 200:
-                        for p in r2.json().get('roster', []):
-                            if p.get('position', {}).get('type') != 'Pitcher':
-                                batter_matchups[_normalize(p['person']['fullName'])] = {
-                                    **p_stats,
-                                    'opp_pitcher': away_pitcher.get('fullName', ''),
-                                }
-                except Exception:
-                    pass
-
-        # Away batters face the home starter
+            pitcher_stat_tasks.append((away_pitcher['id'], away_pitcher.get('fullName',''), home_id, home_name))
+            team_stat_tasks.append((away_pitcher['id'], away_pitcher.get('fullName',''), home_id, home_name))
         if home_pitcher.get('id'):
-            p_stats = _pitcher_season_stats(home_pitcher['id'])
-            if p_stats:
-                try:
-                    r3 = _http.get(f"{_MLB_API}/teams/{away_id}/roster",
-                        params={"rosterType": "active", "season": 2026}, timeout=10)
-                    if r3.status_code == 200:
-                        for p in r3.json().get('roster', []):
-                            if p.get('position', {}).get('type') != 'Pitcher':
-                                batter_matchups[_normalize(p['person']['fullName'])] = {
-                                    **p_stats,
-                                    'opp_pitcher': home_pitcher.get('fullName', ''),
-                                }
-                except Exception:
-                    pass
+            pitcher_stat_tasks.append((home_pitcher['id'], home_pitcher.get('fullName',''), away_id, away_name))
+            team_stat_tasks.append((home_pitcher['id'], home_pitcher.get('fullName',''), away_id, away_name))
 
-        # Home pitcher faces the away lineup
-        if home_pitcher.get('id'):
-            t_stats = _team_hitting_stats(away_id)
-            if t_stats:
-                pitcher_matchups[_normalize(home_pitcher.get('fullName', ''))] = {
-                    'team_ops':   t_stats['ops'],
-                    'team_avg':   t_stats['avg'],
-                    'team_k_pct': t_stats['k_pct'],
-                    'opp_team':   away_name,
-                }
+    roster_cache2 = {}
 
-        # Away pitcher faces the home lineup
-        if away_pitcher.get('id'):
-            t_stats = _team_hitting_stats(home_id)
-            if t_stats:
-                pitcher_matchups[_normalize(away_pitcher.get('fullName', ''))] = {
-                    'team_ops':   t_stats['ops'],
-                    'team_avg':   t_stats['avg'],
-                    'team_k_pct': t_stats['k_pct'],
-                    'opp_team':   home_name,
-                }
+    def _fetch_batter_defense(pitcher_id, pitcher_name, batter_team_id, _unused):
+        """Fetch pitcher stats + roster for batter-side matchups."""
+        p_stats = _pitcher_season_stats(pitcher_id)
+        if not p_stats:
+            return {}
+        try:
+            r2 = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
+                params={"rosterType": "active", "season": 2026}, timeout=10)
+            roster = r2.json().get('roster', []) if r2.status_code == 200 else []
+        except Exception:
+            roster = []
+        out = {}
+        for p in roster:
+            if p.get('position', {}).get('type') != 'Pitcher':
+                out[_normalize(p['person']['fullName'])] = {**p_stats, 'opp_pitcher': pitcher_name}
+        return out
+
+    def _fetch_pitcher_defense(pitcher_id, pitcher_name, opp_team_id, opp_team_name):
+        t_stats = _team_hitting_stats(opp_team_id)
+        if not t_stats:
+            return {}
+        return {_normalize(pitcher_name): {
+            'team_ops':   t_stats['ops'],
+            'team_avg':   t_stats['avg'],
+            'team_k_pct': t_stats['k_pct'],
+            'opp_team':   opp_team_name,
+        }}
+
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        batter_futs  = [ex.submit(_fetch_batter_defense, *t) for t in pitcher_stat_tasks]
+        pitcher_futs = [ex.submit(_fetch_pitcher_defense, *t) for t in team_stat_tasks]
+        for fut in as_completed(batter_futs):
+            try:
+                batter_matchups.update(fut.result())
+            except Exception:
+                pass
+        for fut in as_completed(pitcher_futs):
+            try:
+                pitcher_matchups.update(fut.result())
+            except Exception:
+                pass
 
     print(f"   Defensive matchups: {len(batter_matchups)} batters, {len(pitcher_matchups)} pitchers")
     try:
