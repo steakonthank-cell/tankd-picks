@@ -20,9 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 1. API Configuration
-ODDS_API_KEY = os.getenv('ODDS_API_KEY')
-if not ODDS_API_KEY:
-    raise ValueError("API Key not found! Make sure you have a .env file with ODDS_API_KEY inside.")
+ODDS_API_KEY = os.getenv('ODDS_API_KEY', '')
 
 # 2. Sport Constants
 SPORT_MAP = {
