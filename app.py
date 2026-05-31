@@ -1272,6 +1272,10 @@ def _run_mlb():
     try:
         from src.sports.mlb.scanner import _ensure_session, get_all_projections
         b, p, m = _ensure_session()
+        if b is None and p is None:
+            return pd.DataFrame(), "Training data not loaded"
+        if not m:
+            return pd.DataFrame(), "No trained models found"
         return get_all_projections(b, p, m), None
     except Exception as e:
         return pd.DataFrame(), str(e)
@@ -1655,7 +1659,14 @@ elif sport == "⚾ MLB":
             df_mlb = _latest_csv(os.path.join(_BASE, "output", "mlb", "scans", "scan_*.csv"))
 
         if df_mlb.empty:
-            st.info("No MLB data. Run Build Data → Features → Train from the CLI first.")
+            from src.sports.mlb.scanner import _ensure_session
+            b, p, m = _ensure_session()
+            reasons = []
+            if b is None: reasons.append("batter training data missing")
+            if p is None: reasons.append("pitcher training data missing")
+            if not m:     reasons.append("no trained models found")
+            detail = " · ".join(reasons) if reasons else "PrizePicks returned no MLB props today"
+            st.info(f"No plays found — {detail}")
         else:
             batters  = df_mlb[df_mlb["Is_Pitcher"] == False].copy() if "Is_Pitcher" in df_mlb.columns else df_mlb.copy()
             pitchers = df_mlb[df_mlb["Is_Pitcher"] == True].copy()  if "Is_Pitcher" in df_mlb.columns else pd.DataFrame()
