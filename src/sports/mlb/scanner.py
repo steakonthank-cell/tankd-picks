@@ -352,6 +352,14 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
 
         feat_cols = [f for f in feat_list if f in feats]
 
+        def _make_feat_vec(model, feats):
+            """Build feature vector using exactly the columns the model was trained on."""
+            try:
+                model_cols = list(model.feature_names_in_)
+            except AttributeError:
+                model_cols = feat_cols
+            return pd.DataFrame([{c: feats.get(c, 0.0) for c in model_cols}])
+
         # Combo stats — predicted by summing component model projections
         if stat_code in COMBO_STATS:
             component_codes = COMBO_STATS[stat_code]   # e.g. ['H', 'R', 'RBI']
@@ -361,9 +369,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
                 if comp not in models:
                     skip = True
                     break
-                comp_vec = pd.DataFrame([{c: feats.get(c, 0.0) for c in feat_cols}])
                 try:
-                    proj += float(models[comp].predict(comp_vec)[0])
+                    proj += float(models[comp].predict(_make_feat_vec(models[comp], feats))[0])
                 except Exception:
                     skip = True
                     break
@@ -372,9 +379,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
             proj = max(0.0, proj)
         else:
             model = models[stat_code]
-            feat_vec  = pd.DataFrame([{c: feats.get(c, 0.0) for c in feat_cols}])
             try:
-                proj = float(model.predict(feat_vec)[0])
+                proj = float(model.predict(_make_feat_vec(model, feats))[0])
                 proj = max(0.0, proj)
             except Exception:
                 continue
