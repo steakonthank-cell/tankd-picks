@@ -1149,7 +1149,7 @@ def _run_super_scanner():
         return f"1H {s}" if lg == "NBA1H" and not s.startswith("1H ") else s
 
     pp_df = _fetch_nba_pp_board()
-    if pp_df.empty: return pd.DataFrame(), pd.DataFrame(), "PrizePicks unavailable"
+    if pp_df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "PrizePicks unavailable"
 
     pp_df["Stat"] = pp_df.apply(_ns, axis=1)
     pp_df["Stat"] = pp_df["Stat"].replace(PP_NORMALIZATION_MAP)
@@ -1158,16 +1158,16 @@ def _run_super_scanner():
                        regions=REGIONS, odds_format=ODDS_FORMAT, stat_map=STAT_MAP)
     _, date = get_games(date_offset=0, require_scheduled=True)
     fd_df = fd.get_all_odds(target_date=date)
-    if fd_df.empty: return pd.DataFrame(), pd.DataFrame(), f"FanDuel unavailable for {date}"
+    if fd_df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"FanDuel unavailable for {date}"
 
     math = PropsAnalyzer(pp_df, fd_df, league="NBA").calculate_edges()
-    if math.empty: return pd.DataFrame(), pd.DataFrame(), "No math edges found"
+    if math.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "No math edges found"
 
     df_h, models = _nba_session()
-    if df_h is None or not models: return pd.DataFrame(), pd.DataFrame(), "Models not loaded"
+    if df_h is None or not models: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "Models not loaded"
 
     ai = get_all_projections(df_h, models, date_offset=0)
-    if ai.empty: return pd.DataFrame(), pd.DataFrame(), "AI projections empty"
+    if ai.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "AI projections empty"
 
     math["Stat"]      = math["Stat"].map(STAT_MAPPING).fillna(math["Stat"])
     math["CleanName"] = math["Player"].apply(normalize_name)
