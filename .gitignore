@@ -1,34 +1,55 @@
-# Secrets
+# ── Secrets (NEVER commit these) ─────────────────────────────────────────────
 .streamlit/secrets.toml
 .env
+*.key
+*.pem
 
-# Caches & generated data
+# ── Runtime caches ────────────────────────────────────────────────────────────
 prizepicks_cache/
 fanduel_cache/
 pickfinder_cache/
 moneylines_cache/
 data/espn_odds_cache.json
+
+# ── Scanner output (regenerated at runtime) ───────────────────────────────────
 output/
 
-# Large data files
+# ── Large data / model files (too big for GitHub free tier) ──────────────────
 data/tennis/raw/
-data/*/raw/
+data/nba/raw/
+data/mlb/raw/
+data/wnba/raw/
 data/*/processed/*.csv
 data/*/processed/*.parquet
 models/
 
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .Python
 *.egg-info/
 dist/
 build/
+.venv/
+venv/
+env/
 
-# macOS
+# ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# Jupyter
+# ── Editors ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
+
+# ── Claude ───────────────────────────────────────────────────────────────────
+.claude/
