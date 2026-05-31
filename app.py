@@ -1451,14 +1451,27 @@ if sport == "🏀 NBA":
                 # Top plays cards
                 if not std.empty:
                     st.markdown('<div class="section-header" style="margin-top:8px">🔥 Top Plays</div>', unsafe_allow_html=True)
-                    _top_plays_cards(_add_photos(std), img_col="Image_URL", name_col="Player",
-                                     stat_col="Stat", line_col="PP_Line", tier_col="Tier")
+                    try:
+                        _top_plays_cards(_add_photos(std), img_col="Image_URL", name_col="Player",
+                                         stat_col="Stat", line_col="Line", tier_col="Tier")
+                    except Exception as _e:
+                        st.caption(f"Cards unavailable: {_e}")
 
-                _show_plays(std, "Standard Lines")
+                try:
+                    _show_plays(std, "Standard Lines")
+                except Exception as _e:
+                    st.error(f"Table error: {_e}")
+                    st.dataframe(std, use_container_width=True, hide_index=True)
                 if not gob.empty:
-                    _show_plays(gob, "🟢 Goblin Lines — Easier lines, lower payout", badge_color="blue", hide_side=True)
+                    try:
+                        _show_plays(gob, "🟢 Goblin Lines — Easier lines, lower payout", badge_color="blue", hide_side=True)
+                    except Exception:
+                        st.dataframe(gob, use_container_width=True, hide_index=True)
                 if not dem.empty:
-                    _show_plays(dem, "😈 Demon Lines — Harder lines, higher payout", badge_color="green", hide_side=True)
+                    try:
+                        _show_plays(dem, "😈 Demon Lines — Harder lines, higher payout", badge_color="green", hide_side=True)
+                    except Exception:
+                        st.dataframe(dem, use_container_width=True, hide_index=True)
         else:
             _empty()
 
