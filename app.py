@@ -1273,10 +1273,13 @@ def _run_mlb():
         from src.sports.mlb.scanner import _ensure_session, get_all_projections
         b, p, m = _ensure_session()
         if b is None and p is None:
-            return pd.DataFrame(), "Training data not loaded"
+            raise RuntimeError("Training data not loaded")
         if not m:
-            return pd.DataFrame(), "No trained models found"
-        return get_all_projections(b, p, m), None
+            raise RuntimeError("No trained models found")
+        result = get_all_projections(b, p, m)
+        if result.empty:
+            raise RuntimeError("No projections returned")
+        return result, None
     except Exception as e:
         return pd.DataFrame(), str(e)
 

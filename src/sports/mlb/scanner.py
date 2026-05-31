@@ -705,7 +705,8 @@ _SESSION_LOADED   = False
 
 def _ensure_session():
     global _SESSION_BATTERS, _SESSION_PITCHERS, _SESSION_MODELS, _SESSION_LOADED
-    if _SESSION_LOADED:
+    # Only skip reload if data actually loaded successfully
+    if _SESSION_LOADED and (_SESSION_BATTERS is not None or _SESSION_PITCHERS is not None):
         return _SESSION_BATTERS, _SESSION_PITCHERS, _SESSION_MODELS
     print("\n   Loading data and models...")
     _SESSION_BATTERS, _SESSION_PITCHERS = load_data()
