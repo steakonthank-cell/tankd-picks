@@ -1212,7 +1212,7 @@ def _run_super_scanner():
 def _run_odds_scanner():
     from src.core.odds_providers.fanduel    import FanDuelClient
     from src.core.analyzers.analyzer        import PropsAnalyzer
-    from src.sports.nba.config import ODDS_API_KEY as _K, SPORT_MAP, REGIONS, ODDS_FORMAT
+    from src.sports.nba.config import ODDS_API_KEY as _K, SPORT_MAP, REGIONS, ODDS_FORMAT, STAT_MAP
     from src.sports.nba.scanner import get_games
 
     def _ns(r):
@@ -1229,10 +1229,10 @@ def _run_odds_scanner():
     fd_df = fd.get_all_odds(target_date=dt)
 
     if pp_df.empty or fd_df.empty:
-        return pd.DataFrame(), pd.DataFrame(), "Data source unavailable"
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "Data source unavailable"
 
     df = PropsAnalyzer(pp_df, fd_df, league="NBA").calculate_edges()
-    if df.empty: return pd.DataFrame(), pd.DataFrame(), "No matches found"
+    if df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "No matches found"
 
     df = df.sort_values("Implied_Win_%", ascending=False)
     if "OddsType" in pp_df.columns:
