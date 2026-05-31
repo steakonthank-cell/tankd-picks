@@ -1875,6 +1875,11 @@ elif sport == "🎾 Tennis":
             df_ten = df_ten.rename(columns={k: v for k, v in col_map.items() if k in df_ten.columns})
             df_ten = df_ten.loc[:, ~df_ten.columns.duplicated()]
 
+            # Keep only standard + goblin lines — drop demons
+            if "OddsType" in df_ten.columns:
+                df_ten = df_ten[df_ten["OddsType"].str.lower().isin(["standard", "goblin", ""])]
+            if "Is_Demon" in df_ten.columns:
+                df_ten = df_ten[df_ten["Is_Demon"] != True]
 
             search = st.text_input("Search player", key="ten_srch")
             if search:

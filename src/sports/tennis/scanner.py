@@ -232,10 +232,14 @@ def get_pp_lines(date_offset=0, max_days_forward=7):
         print("    Wait 30 seconds and try again.")
         return pd.DataFrame(), None
 
-    # --- Filter for tennis with case-insensitive match ---
+    # --- Filter for tennis with case-insensitive match, standard + goblin only ---
     tennis_board = full_board[
         full_board['League'].str.lower().str.contains('tennis', na=False)
     ].copy()
+    if 'OddsType' in tennis_board.columns:
+        tennis_board = tennis_board[
+            tennis_board['OddsType'].str.lower().isin(['standard', 'goblin', ''])
+        ]
 
     if tennis_board.empty:
         # Show what leagues ARE available so user knows what's on the board
