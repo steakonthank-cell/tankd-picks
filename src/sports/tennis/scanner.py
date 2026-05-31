@@ -180,6 +180,10 @@ class _EnsembleModel:
         lgbm_p = self.lgbm.predict(X)
         return 0.60 * xgb_p + 0.40 * lgbm_p
 
+    @property
+    def feature_names_in_(self):
+        return self.xgb.feature_names_in_
+
 
 def load_models():
     models = {}
