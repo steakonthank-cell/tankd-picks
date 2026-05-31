@@ -562,13 +562,32 @@ def calculate_confidence_score(edge_pct, l10_hit, opponent_win_pct=None, is_role
 
 def load_data():
     if not os.path.exists(DATA_FILE): return None
-    df = pd.read_csv(DATA_FILE)
+    # Only load the last 2 seasons — cuts 458MB file to ~15% of that size
+    # and is all the model needs (build_data_cache uses current season anyway)
+    import csv
+    with open(DATA_FILE, 'r') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+    try:
+        date_col = header.index('GAME_DATE')
+    except ValueError:
+        date_col = None
+
+    if date_col is None:
+        df = pd.read_csv(DATA_FILE, low_memory=False)
+    else:
+        cutoff = (pd.Timestamp.now() - pd.DateOffset(years=2)).strftime('%Y-%m-%d')
+        df = pd.read_csv(DATA_FILE, low_memory=False,
+                         parse_dates=['GAME_DATE'])
+        df = df[df['GAME_DATE'] >= cutoff]
+
     df.columns = [c.strip() for c in df.columns]
-    df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
+    if 'GAME_DATE' in df.columns:
+        df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
     return df
 
 
-def bootstrap_from_api(season: str = '2025-26') -> pd.DataFrame | None:
+def bootstrap_from_api(season: str = '2025-26'):
     """
     Fetch the full current-season game log from the NBA API.
     Used on Streamlit Cloud where the 464 MB training CSV is not committed.
