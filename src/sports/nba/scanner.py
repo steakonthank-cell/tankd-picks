@@ -568,6 +568,53 @@ def load_data():
     return df
 
 
+def bootstrap_from_api(season: str = '2025-26') -> pd.DataFrame | None:
+    """
+    Fetch the full current-season game log from the NBA API.
+    Used on Streamlit Cloud where the 464 MB training CSV is not committed.
+    Returns a DataFrame with the same raw columns as the training dataset,
+    or None if the API is unreachable.
+    """
+    from nba_api.stats.endpoints import playergamelogs
+
+    _log(f"bootstrap_from_api: fetching full {season} season from NBA API...")
+    RAW_COLS = [
+        'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'TEAM_ABBREVIATION',
+        'GAME_ID', 'GAME_DATE', 'MATCHUP', 'WL', 'SEASON_ID',
+        'MIN', 'PTS', 'REB', 'AST', 'FG3M', 'FG3A', 'STL', 'BLK', 'TOV',
+        'FGM', 'FGA', 'FTM', 'FTA', 'OREB', 'DREB', 'PF',
+        'NBA_FANTASY_PTS', 'PLUS_MINUS',
+    ]
+
+    for attempt in range(3):
+        try:
+            timeout = 90 + attempt * 30
+            if attempt > 0:
+                time.sleep(5)
+            logs = playergamelogs.PlayerGameLogs(
+                season_nullable=season,
+                league_id_nullable='00',
+                timeout=timeout,
+            )
+            df = logs.get_data_frames()[0]
+            if df.empty:
+                return None
+            df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
+            if 'SEASON_YEAR' in df.columns and 'SEASON_ID' not in df.columns:
+                df['SEASON_ID'] = df['SEASON_YEAR']
+            if 'SEASON_ID' not in df.columns:
+                df['SEASON_ID'] = season
+            keep = [c for c in RAW_COLS if c in df.columns]
+            df = df[keep].copy()
+            df.columns = [c.strip() for c in df.columns]
+            _log(f"bootstrap_from_api: {len(df):,} rows fetched.")
+            return df
+        except Exception as e:
+            _log(f"bootstrap_from_api attempt {attempt+1} failed: {e}")
+
+    return None
+
+
 def auto_refresh_data(df_history):
     """
     Fetch recent game logs from NBA API and merge into df_history.

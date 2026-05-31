@@ -1115,10 +1115,16 @@ def _empty(msg="No data yet — click the button above to run."):
 @st.cache_resource(show_spinner=False)
 def _nba_session():
     try:
-        from src.sports.nba.scanner import load_data, load_models, auto_refresh_data, refresh_injuries
+        from src.sports.nba.scanner import (
+            load_data, load_models, auto_refresh_data,
+            refresh_injuries, bootstrap_from_api,
+        )
         refresh_injuries()
         df = load_data()
-        if df is not None:
+        if df is None:
+            # Training CSV not available (Streamlit Cloud) — fetch live from NBA API
+            df = bootstrap_from_api()
+        elif df is not None:
             df = auto_refresh_data(df)
         return df, load_models()
     except Exception:
@@ -1404,7 +1410,7 @@ if sport == "🏀 NBA":
     st.markdown('<div class="page-subtitle">Super Scanner · Odds Scanner · AI Projections</div>',
                 unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["⚡  Super Scanner", "📊  Odds Scanner", "🤖  AI Projections", "📈  Metrics"])
+    tab1, tab2, tab3 = st.tabs(["⚡  Super Scanner", "📊  Odds Scanner", "🤖  AI Projections"])
 
     # Super Scanner
     with tab1:
@@ -1530,17 +1536,6 @@ if sport == "🏀 NBA":
         else:
             _empty()
 
-    # Metrics
-    with tab4:
-        df_m = _metrics("nba")
-        if df_m.empty:
-            st.info("No metrics found. Train models from the CLI first.")
-        else:
-            st.markdown('<div class="section-header">Model Performance</div>', unsafe_allow_html=True)
-            st.dataframe(df_m, use_container_width=True, hide_index=True)
-            if "Last_Updated" in df_m.columns:
-                st.caption(f"Last trained: {df_m['Last_Updated'].iloc[-1]}")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # MLB
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1549,7 +1544,7 @@ elif sport == "⚾ MLB":
     st.markdown('<div class="page-subtitle">Super Scanner · Odds Scanner · AI Projections</div>',
                 unsafe_allow_html=True)
 
-    tab_b, tab_p, tab_m = st.tabs(["🏏  AI Scanner (B) — Batters", "⚾  AI Scanner (P) — Pitchers", "📈  Metrics"])
+    tab_b, tab_p = st.tabs(["🏏  AI Scanner (B) — Batters", "⚾  AI Scanner (P) — Pitchers"])
 
     def _render_mlb_section(df_section, key_prefix, is_pitcher=False):
         """Render core table + splits + matchup for a batter or pitcher subset."""
@@ -1666,13 +1661,6 @@ elif sport == "⚾ MLB":
             _empty()
         with tab_p:
             _empty()
-
-    with tab_m:
-        df_m = _metrics("mlb")
-        if df_m.empty:
-            st.info("No metrics found. Train models from the CLI first.")
-        else:
-            st.dataframe(_round_df(df_m), use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # WNBA
