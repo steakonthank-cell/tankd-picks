@@ -1372,7 +1372,7 @@ def _add_photos(df, player_col="Player"):
 
 # ── Render helpers ────────────────────────────────────────────────────────────
 def _show_plays(df, label, badge_color="green", hide_side=False):
-    if df.empty:
+    if df is None or df.empty:
         _empty()
         return
     n = len(df)
@@ -1381,10 +1381,15 @@ def _show_plays(df, label, badge_color="green", hide_side=False):
     df = _round_df(df)
     st.markdown(f'<div class="section-header">{label} <span class="badge {badge_color}">{n} plays</span></div>',
                 unsafe_allow_html=True)
-    style = df.style
-    if not hide_side and "Side" in df.columns: style = style.map(_style_side, subset=["Side"])
-    if "Score" in df.columns: style = style.map(_style_score, subset=["Score"])
-    st.dataframe(style, use_container_width=True, hide_index=True)
+    try:
+        style = df.style
+        if not hide_side and "Side" in df.columns:
+            style = style.map(_style_side, subset=["Side"])
+        if "Score" in df.columns:
+            style = style.map(_style_score, subset=["Score"])
+        st.dataframe(style, use_container_width=True, hide_index=True)
+    except Exception:
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NAV
@@ -1465,7 +1470,11 @@ if sport == "🏀 NBA":
                     _show_plays(std, "Standard Lines")
                 except Exception as _e:
                     st.error(f"Table error: {_e}")
-                    st.dataframe(std, use_container_width=True, hide_index=True)
+                    try:
+                        st.dataframe(std.astype(str), use_container_width=True, hide_index=True)
+                    except Exception as _e2:
+                        st.error(f"Raw table also failed: {_e2}")
+                        st.write(std.head(3).to_dict())
                 if not gob.empty:
                     try:
                         _show_plays(gob, "🟢 Goblin Lines — Easier lines, lower payout", badge_color="blue", hide_side=True)
@@ -1500,13 +1509,10 @@ if sport == "🏀 NBA":
                 st.error(err2)
             else:
                 _show_plays(std2.head(25), "Standard Lines")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if not gob2.empty:
-                        _show_plays(gob2.head(20), "🟢 Goblin Lines — Easier, lower payout", badge_color="blue", hide_side=True)
-                with c2:
-                    if not dem2.empty:
-                        _show_plays(dem2.head(20), "😈 Demon Lines — Harder, higher payout", badge_color="green", hide_side=True)
+                if not gob2.empty:
+                    _show_plays(gob2.head(20), "🟢 Goblin Lines — Easier, lower payout", badge_color="blue", hide_side=True)
+                if not dem2.empty:
+                    _show_plays(dem2.head(20), "😈 Demon Lines — Harder, higher payout", badge_color="green", hide_side=True)
         else:
             _empty()
 
@@ -1811,12 +1817,13 @@ elif sport == "🏀 WNBA":
                                  stat_col="Stat", line_col="PP_Line", tier_col="Tier_Emoji")
 
             _wnba_table(wnba_std, "📋 Standard Lines")
-            if not wnba_gob.empty or not wnba_dem.empty:
-                _gc, _dc = st.columns(2)
-                with _gc:
-                    _wnba_table(wnba_gob, "🟢 Goblin Lines", hide_side=True)
-                with _dc:
-                    _wnba_table(wnba_dem, "😈 Demon Lines", hide_side=True)
+            if not wnba_gob.empty:
+                # Only show goblins where AI projection matched (has AI_Proj)
+                _gob_show = wnba_gob.dropna(subset=["AI_Proj"]) if "AI_Proj" in wnba_gob.columns else wnba_gob
+                if not _gob_show.empty:
+                    _wnba_table(_gob_show, "🟢 Goblin Lines", hide_side=True)
+            if not wnba_dem.empty:
+                _wnba_table(wnba_dem, "😈 Demon Lines", hide_side=True)
     else:
         _empty()
 
