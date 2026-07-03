@@ -673,7 +673,13 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {filtered.filter(p => !search || p.player.toLowerCase().includes(search.toLowerCase())).length === 0 && (
           <div style={{ textAlign: "center", padding: 40, color: C.textDim, fontSize: 13 }}>
-            {search ? "No players match " + search : "No picks for this line yet"}
+            {search
+              ? "No players match " + search
+              : gradeFilter !== "all"
+                ? `No ${gradeFilter} picks right now`
+                : tierFilter !== "all"
+                  ? `No ${tierFilter} picks right now`
+                  : "No picks for this line yet"}
           </div>
         )}
         {filtered.filter(p => !search || p.player.toLowerCase().includes(search.toLowerCase())).map((pick, i) => (
