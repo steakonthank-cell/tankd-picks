@@ -31,6 +31,10 @@ SPORT_CONFIGS = {
 TARGET_BOOKS = ['fanduel', 'draftkings', 'betmgm', 'caesars', 'espnbet']
 BASE_URL = "https://api.the-odds-api.com/v4/sports"
 
+# Max allowed deviation (in implied-probability points) from the group median
+# before a book's quote is dropped from the average.
+OUTLIER_MAX_DEVIATION = 0.08
+
 
 def _american_to_implied(odds: float) -> float:
     """Convert American odds to implied probability (0-1)."""
@@ -38,6 +42,34 @@ def _american_to_implied(odds: float) -> float:
         return 100.0 / (odds + 100.0)
     else:
         return abs(odds) / (abs(odds) + 100.0)
+
+
+def _implied_to_american(prob: float) -> float:
+    """Convert implied probability (0-1) back to American odds."""
+    prob = min(max(prob, 1e-6), 1 - 1e-6)
+    if prob >= 0.5:
+        return -100.0 * prob / (1.0 - prob)
+    else:
+        return 100.0 * (1.0 - prob) / prob
+
+
+def _filter_outlier_odds(book_odds: dict) -> dict:
+    """Drop books whose implied probability strays too far from the group median.
+
+    Raw American odds can look wildly different between books while implying
+    almost the same probability (-10000 vs -100000 are both ~99% favorites),
+    so outliers are detected in probability space, not on the raw odds. Never
+    filters below 2 books — with too few quotes there's nothing to compare
+    against, so we fall back to using everything.
+    """
+    if len(book_odds) <= 2:
+        return book_odds
+    implieds = {book: _american_to_implied(o) for book, o in book_odds.items()}
+    sorted_probs = sorted(implieds.values())
+    n = len(sorted_probs)
+    median = sorted_probs[n // 2] if n % 2 else (sorted_probs[n // 2 - 1] + sorted_probs[n // 2]) / 2
+    kept = {book: o for book, o in book_odds.items() if abs(implieds[book] - median) <= OUTLIER_MAX_DEVIATION}
+    return kept if len(kept) >= 2 else book_odds
 
 
 def _load_cache():
@@ -174,13 +206,19 @@ def fetch_moneylines(api_key: str) -> list:
                 if not book_odds:
                     continue
 
-                odds_vals = list(book_odds.values())
-                avg_odds  = sum(odds_vals) / len(odds_vals)
+                filtered_odds = _filter_outlier_odds(book_odds)
+                if len(filtered_odds) < len(book_odds):
+                    dropped = sorted(set(book_odds) - set(filtered_odds))
+                    print(f"   {sport_label}: dropped outlier odds for {team} from {', '.join(dropped)}")
+
+                odds_vals  = list(book_odds.values())
+                avg_implied = sum(_american_to_implied(o) for o in filtered_odds.values()) / len(filtered_odds)
+                avg_odds   = _implied_to_american(avg_implied)
                 best_odds  = max(odds_vals)
                 worst_odds = min(odds_vals)
                 best_book  = max(book_odds, key=book_odds.get)
                 worst_book = min(book_odds, key=book_odds.get)
-                implied    = _american_to_implied(avg_odds)
+                implied    = avg_implied
                 opponent   = away if team == home else home
                 is_home    = (team == home)
 
