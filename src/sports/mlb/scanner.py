@@ -422,8 +422,17 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         pf_key  = (normalize_name(player_name), stat_display)
         pf_data = pf_lookup.get(pf_key, {})
 
+        # Goblin/demon alt-lines are Over-only markets on PrizePicks (goblin =
+        # suppressed line for a discounted-payout gimme, demon = inflated line
+        # for a boosted-payout stretch). There is no "Under" contract for either
+        # — deriving Side from raw edge sign produces a fake pick (e.g. a demon
+        # K line miles above a pitcher's recent output getting tagged "Under").
+        if is_goblin or is_demon:
+            is_over = True
+        else:
+            is_over = edge > 0
+
         # Flip net_move sign for UNDER bets (positive net = over pressure)
-        is_over  = edge > 0
         net_move = pf_data.get('net_move', 0) or 0
         pf_mov   = net_move if is_over else -net_move
 
