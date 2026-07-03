@@ -689,10 +689,21 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                 const tc = pick.grade
                   ? tierColors(tier)
                   : { fg: TIER_COLORS[tier] || C.textDim, bg: TIER_BG[tier] || C.card2, bd: C.line2 };
+                // The number itself must also read distinctly: a goblin's cd.pct
+                // is a calibrated win probability, but pick.score is an unscaled
+                // 0-100 heuristic (edge/consistency/streak) with no probabilistic
+                // meaning \u2014 showing it the same size/weight/color as a calibrated
+                // % implied it was one. De-emphasize it and label the unit so it
+                // can't be misread as a %.
+                const isCalibrated = cd && cd.pct != null;
                 return (
                   <div style={{ flexShrink: 0, textAlign: "center", minWidth: 56 }}>
-                    <div style={{ fontFamily: FONT_MONO, fontSize: 23, fontWeight: 800, color: C.text, lineHeight: 1, letterSpacing: -1, fontVariantNumeric: "tabular-nums" }}>
-                      {cd && cd.pct != null ? cd.pct + "%" : (pick.score != null ? pick.score : "\u2014")}
+                    <div style={{ fontFamily: FONT_MONO, fontSize: isCalibrated ? 23 : 19, fontWeight: 800, color: isCalibrated ? C.text : C.textDim, lineHeight: 1, letterSpacing: -1, fontVariantNumeric: "tabular-nums" }}>
+                      {isCalibrated
+                        ? cd.pct + "%"
+                        : (pick.score != null
+                            ? <>{pick.score}<span style={{ fontSize: 10, fontWeight: 700, marginLeft: 2, color: C.textDim }}>SC</span></>
+                            : "\u2014")}
                     </div>
                     <div style={{ marginTop: 5, fontFamily: FONT_COND, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, padding: "2px 0", borderRadius: 5, color: tc.fg, background: tc.bg, border: `1px solid ${tc.bd}` }}>
                       {tier || "SC"}
