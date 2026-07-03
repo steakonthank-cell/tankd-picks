@@ -222,6 +222,25 @@ def enrich_scan_data(df: pd.DataFrame, sport: str = "mlb", game_context: dict = 
 
     # --- Compute base score from v1 signals ---
     df["edge"] = pd.to_numeric(df["edge"], errors="coerce").fillna(0)
+
+    # Edge_Pct (MLB) is an *unsigned* magnitude (scanner.py's edge_pct =
+    # abs(proj - line) / line). For goblin/demon alt lines, Side is forced
+    # to "Over" independent of the sign of (proj - line) — PrizePicks
+    # goblins/demons are Over-only markets — so a projection that lands far
+    # BELOW an inflated demon line still reports a huge Edge_Pct, and the
+    # score formula below saturates as if that were a strong pick (see the
+    # Luke Raley HRR 4.5 case: proj 1.37 vs line 4.5 scored 64.6/DECENT).
+    # Flip the sign whenever the raw (proj - line) direction disagrees with
+    # the picked Side, so an unfavorable demon/goblin correctly scores low
+    # instead of maxing out. No-op for regular lines (Side already agrees
+    # with the raw sign there) and for formats without a raw signed "Edge"
+    # column (e.g. WNBA's AI_Edge is already signed and is left untouched).
+    if "Edge" in df.columns and "Side" in df.columns:
+        _raw_edge = pd.to_numeric(df["Edge"], errors="coerce").fillna(0)
+        _is_over  = df["Side"].astype(str).str.strip().str.lower() == "over"
+        _agrees   = (_raw_edge >= 0) == _is_over
+        df["edge"] = df["edge"].where(_agrees, -df["edge"])
+
     _con = pd.to_numeric(
         df["Con_Over"] if "Con_Over" in df.columns
         else (df["con_over"] if "con_over" in df.columns else pd.Series(50, index=df.index)),
