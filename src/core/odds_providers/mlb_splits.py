@@ -270,66 +270,38 @@ if __name__ == "__main__":
                   f"{s['avg']:>6.3f} {s['ops']:>6.3f} {s['k_pct']:>5.1f}%")
 
 
-# New get_todays_splits + Savant helpers. Replaces broken statSplits per-batter calls.
-
-def _parse_savant_float(v):
-    """Savant rate stats arrive as strings like '.278' or '0.831'. Safe float."""
-    if v is None:
-        return 0.0
-    s = str(v).strip().strip('"')
-    if s == '' or s == '.':
-        return 0.0
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-
-def _fetch_savant_hand_table(hand: str) -> dict:
+def _batter_splits(player_id: int, hand: str) -> dict:
     """
-    Pull the season hitting leaderboard vs a given pitcher hand from Baseball
-    Savant (one CSV for the whole league). Returns {player_id: {avg,ops,slg,k_pct,ab}}.
+    Return this season's hitting split for one batter vs one pitcher hand
+    ('L' or 'R') from the official MLB Stats API. Keys: avg, ops, ab (=PA), k_pct.
 
-    hand: 'R' or 'L' (the PITCHER's throwing hand the batter faced).
-    Savant filter is pitch_hand|<R|L>.
-
-    min=20 (raw PA vs this hand) instead of Savant's default min=q (qualified
-    for the batting title — full-season PA, ~300+, a much higher bar than PA
-    against one specific hand). q covers ~152 batters/hand; 20 covers ~519 —
-    the tradeoff is more small-sample noise at the margin, which is why the
-    caller keeps and exposes 'ab' (actually PA) per player so the UI can show
-    sample size instead of presenting every row as equally reliable.
+    sportId=1 is required — omitting it 406s, and so does adding gameType=R
+    (undocumented, but confirmed by direct testing: same query 200s without
+    it, 406s with it). That combination is what made this call look "broken"
+    and got it replaced (see get_todays_splits) with a Baseball Savant
+    leaderboard pull whose pitch_hand filter turned out to be a silent no-op
+    instead.
     """
-    import csv, io
-    url = ("https://baseballsavant.mlb.com/leaderboard/custom"
-           "?year=2026&type=batter&filter=pitch_hand|" + hand +
-           "&min=20&selections=pa,batting_avg,slg_percent,on_base_plus_slg,k_percent"
-           "&sortColumn=on_base_plus_slg&sortDirection=desc&csv=true")
-    out = {}
+    sit = 'vr' if hand == 'R' else 'vl'
     try:
-        r = _http.get(url, timeout=20)
+        r = _http.get(f"{_MLB_API}/people/{player_id}/stats",
+            params={"stats": "statSplits", "sitCodes": sit,
+                    "group": "hitting", "season": 2026, "sportId": 1},
+            timeout=8)
         if r.status_code != 200:
-            print(f"   Savant hand={hand} HTTP {r.status_code}")
-            return out
-        reader = csv.DictReader(io.StringIO(r.content.decode('utf-8-sig')))
-        for row in reader:
-            try:
-                pid = int(row.get('player_id') or 0)
-            except (ValueError, TypeError):
-                continue
-            if not pid:
-                continue
-            pa  = int(_parse_savant_float(row.get('pa')))
-            out[pid] = {
-                'avg':   _parse_savant_float(row.get('batting_avg')),
-                'slg':   _parse_savant_float(row.get('slg_percent')),
-                'ops':   _parse_savant_float(row.get('on_base_plus_slg')),
-                'k_pct': _parse_savant_float(row.get('k_percent')),
-                'ab':    pa,   # PA used as volume proxy (Savant gives PA not AB here)
-            }
-    except Exception as e:
-        print(f"   Savant hand={hand} error: {e}")
-    return out
+            return {}
+        splits = r.json().get('stats', [{}])[0].get('splits', [])
+        if not splits:
+            return {}
+        s   = splits[0].get('stat', {})
+        pa  = int(s.get('plateAppearances', 0) or 0)
+        avg = float(s.get('avg', 0) or 0)
+        ops = float(s.get('ops', 0) or 0)
+        so  = int(s.get('strikeOuts', 0) or 0)
+        k_pct = round(so / pa * 100, 1) if pa > 0 else 0.0
+        return {'avg': avg, 'ops': ops, 'ab': pa, 'k_pct': k_pct}
+    except Exception:
+        return {}
 
 
 def get_todays_splits(date_str: str = None) -> dict:
@@ -337,11 +309,15 @@ def get_todays_splits(date_str: str = None) -> dict:
     Build a lookup of every batter playing today -> their season splits vs the
     handedness of today's opposing probable pitcher.
 
-    Data source: Baseball Savant custom leaderboard (pitch_hand filter).
-    Two CSV pulls total (vs R, vs L) for the whole league, joined to today's
-    rosters by player_id, emitted keyed by normalized name.
+    Data source: MLB Stats API statSplits (sitCodes=vl/vr), one call per
+    batter, parallelized. Previously used a Baseball Savant custom-leaderboard
+    pull instead, but its pitch_hand filter was a silent no-op — filter=
+    pitch_hand|L, filter=pitch_hand|R, and no filter at all all returned the
+    same combined-season row (verified against Sal Stewart, id 701398:
+    pa=374/avg=.257 in every case — his combined total, not a single-hand
+    split — vs. the real vs-LHP split of pa=93/avg=.282 from this endpoint).
 
-    Return contract (unchanged from prior MLB-API version):
+    Return contract (unchanged):
         { normalized_name: {'avg','ops','ab','k_pct','hand'} }
     """
     cached = _load_cache()
@@ -351,9 +327,9 @@ def get_todays_splits(date_str: str = None) -> dict:
 
     from datetime import date
     today = date_str or date.today().strftime('%Y-%m-%d')
-    print(f"   Fetching MLB splits for {today} (source: Baseball Savant)...")
+    print(f"   Fetching MLB splits for {today} (source: MLB Stats API statSplits)...")
 
-    # Step 1: today's schedule + probable pitchers (MLB API — this path works)
+    # Step 1: today's schedule + probable pitchers
     try:
         r = _http.get(f"{_MLB_API}/schedule",
             params={"sportId": 1, "date": today,
@@ -371,7 +347,7 @@ def get_todays_splits(date_str: str = None) -> dict:
         print("   No MLB games today")
         return {}
 
-    # Step 2: pitcher hands (parallel) — _pitcher_hand is a /people call, works
+    # Step 2: pitcher hands (parallel)
     pitcher_ids = set()
     for game in games:
         for side in ('away', 'home'):
@@ -389,19 +365,10 @@ def get_todays_splits(date_str: str = None) -> dict:
             except Exception:
                 hand_map[pid] = ''
 
-    # Step 3: pull both Savant hand tables ONCE (2 calls for whole league)
-    savant = {
-        'R': _fetch_savant_hand_table('R'),
-        'L': _fetch_savant_hand_table('L'),
-    }
-    if not savant['R'] and not savant['L']:
-        print("   Savant returned no rows — splits unavailable")
-        return {}
-
-    # Step 4: for each batter on a team facing a known-hand starter, emit the
-    # row matching that hand, keyed by normalized name.
-    result = {}
+    # Step 3: gather (player_id, name, hand-they-face) for every batter on a
+    # team whose opposing starter's hand is known.
     roster_cache = {}
+    batter_jobs = []
 
     for game in games:
         away_team = game['teams']['away']
@@ -419,9 +386,6 @@ def get_todays_splits(date_str: str = None) -> dict:
             matchups.append((hand_map[home_p['id']], away_id))
 
         for pitcher_hand, batter_team_id in matchups:
-            hand_table = savant.get(pitcher_hand, {})
-            if not hand_table:
-                continue
             if batter_team_id not in roster_cache:
                 try:
                     rr = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
@@ -440,16 +404,29 @@ def get_todays_splits(date_str: str = None) -> dict:
                 pname  = person.get('fullName', '')
                 if not pid or not pname:
                     continue
-                stats = hand_table.get(pid)
-                if not stats:
-                    continue   # not a qualified hitter vs this hand
-                result[_normalize(pname)] = {
-                    'avg':   stats['avg'],
-                    'ops':   stats['ops'],
-                    'ab':    stats['ab'],
-                    'k_pct': stats['k_pct'],
-                    'hand':  pitcher_hand,
-                }
+                batter_jobs.append((pid, pname, pitcher_hand))
+
+    # Step 4: fetch each batter's split vs the hand they actually face today,
+    # in parallel — one call per batter.
+    result = {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futs = {ex.submit(_batter_splits, pid, hand): (pname, hand)
+                for pid, pname, hand in batter_jobs}
+        for fut in as_completed(futs):
+            pname, hand = futs[fut]
+            try:
+                stats = fut.result()
+            except Exception:
+                stats = {}
+            if not stats or not stats.get('ab'):
+                continue   # no PA vs this hand this season
+            result[_normalize(pname)] = {
+                'avg':   stats['avg'],
+                'ops':   stats['ops'],
+                'ab':    stats['ab'],
+                'k_pct': stats['k_pct'],
+                'hand':  hand,
+            }
 
     print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
     _save_cache(result)
