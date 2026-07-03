@@ -1,4 +1,4 @@
-const { useState, useMemo, useCallback, useEffect } = React;
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
 
@@ -479,6 +479,40 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
   const [search, setSearch] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+
+  // Incremental render — the per-stat cap was raised 25 -> 1000 server-side
+  // (see api/server.py) so every eligible pick is now fetched, but mounting
+  // hundreds of cards (each with a headshot + expandable detail section of
+  // variable height, which rules out fixed-row virtualization) at once would
+  // be janky on mobile. Render BATCH_SIZE at a time and grow via an
+  // IntersectionObserver sentinel as the user scrolls near the bottom —
+  // sorting/filtering still runs over the FULL fetched set (see `filtered`
+  // above); this only controls how much of that already-correct result is
+  // mounted to the DOM.
+  const BATCH_SIZE = 30;
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const sentinelRef = useRef(null);
+
+  const shown = useMemo(
+    () => filtered.filter(p => !search || p.player.toLowerCase().includes(search.toLowerCase())),
+    [filtered, search]
+  );
+
+  // Reset to the first batch whenever the result set changes underneath us
+  // (stat/line/segment/grade/tier filter, sort, or search) so switching
+  // context is always a fast, small first paint.
+  useEffect(() => { setVisibleCount(BATCH_SIZE); }, [filtered, search]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount(c => c + BATCH_SIZE); },
+      { rootMargin: "400px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visibleCount, shown.length]);
   const SortArrow = ({ col }) => {
     if (sortBy !== col) return null;
     return <span style={{ marginLeft: 2, fontSize: 9 }}>{sortDir === "desc" ? "▼" : "▲"}</span>;
@@ -699,7 +733,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
 
       {/* Picks List */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {filtered.filter(p => !search || p.player.toLowerCase().includes(search.toLowerCase())).length === 0 && (
+        {shown.length === 0 && (
           <div style={{ textAlign: "center", padding: 40, color: C.textDim, fontSize: 13 }}>
             {search
               ? "No players match " + search
@@ -710,7 +744,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                   : "No picks for this line yet"}
           </div>
         )}
-        {filtered.filter(p => !search || p.player.toLowerCase().includes(search.toLowerCase())).map((pick, i) => (
+        {shown.slice(0, visibleCount).map((pick, i) => (
           <div key={`${pick.player}-${pick.stat_type}-${pick.line}`}
             onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
             style={{
@@ -927,6 +961,11 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
             </div>
           </div>
         ))}
+        {visibleCount < shown.length && (
+          <div ref={sentinelRef} style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 11 }}>
+            Loading more… ({visibleCount} of {shown.length})
+          </div>
+        )}
       </div>
     </>
   );

@@ -29,6 +29,7 @@ try:
     from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.middleware.gzip import GZipMiddleware
     import pandas as pd
 except ImportError as e:
     print(f"Missing dependency: {e}")
@@ -76,6 +77,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Picks payload grew ~6x once the per-stat cap was raised (see below) —
+# gzip keeps the mobile transfer cost down (JSON compresses ~5-8x).
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
 def get_latest_csv(sport: str) -> Path | None:
@@ -184,10 +189,19 @@ def df_to_picks(df: pd.DataFrame) -> list:
     picks = deduped
     # SHARP picks (backtested edge bucket) always surface, uncapped — they're
     # the whole point. Then fill the rest under the per-bucket cap.
+    #
+    # Cap raised 25 -> 1000: 25 was hiding the large majority of real eligible
+    # picks in high-volume stats (e.g. HR non-goblin had 252 real candidates
+    # on 2026-07-03, only 25 shown). 1000 is a safety ceiling, not a real
+    # limit — a full MLB slate tops out at ~270 batters total (15 games x 18),
+    # so no stat/goblin bucket can realistically get near this; it only
+    # guards against a data/dedup bug trying to serve an absurd row count.
+    # The frontend renders this incrementally (load-more-on-scroll), so the
+    # full set doesn't have to hit the DOM at once.
     sharp = [p for p in picks if p.get("sharp")]
     rest  = [p for p in picks if not p.get("sharp")]
-    gob = _cap_per_stat([p for p in rest if p.get("is_goblin")], 25)
-    non = _cap_per_stat([p for p in rest if not p.get("is_goblin")], 25)
+    gob = _cap_per_stat([p for p in rest if p.get("is_goblin")], 1000)
+    non = _cap_per_stat([p for p in rest if not p.get("is_goblin")], 1000)
     return sharp + gob + non
 
 
