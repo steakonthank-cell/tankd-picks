@@ -89,6 +89,49 @@ function teamColor(abbr) {
   return TEAM_COLORS[(abbr || "").toUpperCase()] || C.teal;
 }
 
+// Team logos (ESPN CDN), keyed by full team name — ported from the legacy
+// Streamlit app's _ESPN_MLB/_ESPN_NBA/_ESPN_WNBA + _team_logo() (app.py).
+const TEAM_LOGO_SLUG = {
+  MLB: {
+    "Arizona Diamondbacks":"ari","Atlanta Braves":"atl","Baltimore Orioles":"bal",
+    "Boston Red Sox":"bos","Chicago Cubs":"chc","Chicago White Sox":"chw",
+    "Cincinnati Reds":"cin","Cleveland Guardians":"cle","Colorado Rockies":"col",
+    "Detroit Tigers":"det","Houston Astros":"hou","Kansas City Royals":"kc",
+    "Los Angeles Angels":"laa","Los Angeles Dodgers":"lad","Miami Marlins":"mia",
+    "Milwaukee Brewers":"mil","Minnesota Twins":"min","New York Mets":"nym",
+    "New York Yankees":"nyy","Athletics":"oak","Oakland Athletics":"oak",
+    "Philadelphia Phillies":"phi","Pittsburgh Pirates":"pit","San Diego Padres":"sd",
+    "San Francisco Giants":"sf","Seattle Mariners":"sea","St. Louis Cardinals":"stl",
+    "Tampa Bay Rays":"tb","Texas Rangers":"tex","Toronto Blue Jays":"tor",
+    "Washington Nationals":"wsh",
+  },
+  NBA: {
+    "Atlanta Hawks":"atl","Boston Celtics":"bos","Brooklyn Nets":"bkn",
+    "Charlotte Hornets":"cha","Chicago Bulls":"chi","Cleveland Cavaliers":"cle",
+    "Dallas Mavericks":"dal","Denver Nuggets":"den","Detroit Pistons":"det",
+    "Golden State Warriors":"gs","Houston Rockets":"hou","Indiana Pacers":"ind",
+    "Los Angeles Clippers":"lac","Los Angeles Lakers":"lal","Memphis Grizzlies":"mem",
+    "Miami Heat":"mia","Milwaukee Bucks":"mil","Minnesota Timberwolves":"min",
+    "New Orleans Pelicans":"no","New York Knicks":"ny","Oklahoma City Thunder":"okc",
+    "Orlando Magic":"orl","Philadelphia 76ers":"phi","Phoenix Suns":"phx",
+    "Portland Trail Blazers":"por","Sacramento Kings":"sac","San Antonio Spurs":"sa",
+    "Toronto Raptors":"tor","Utah Jazz":"utah","Washington Wizards":"wsh",
+  },
+  WNBA: {
+    "Atlanta Dream":"atl","Chicago Sky":"chi","Connecticut Sun":"conn",
+    "Dallas Wings":"dal","Indiana Fever":"ind","Las Vegas Aces":"lv",
+    "Los Angeles Sparks":"la","Minnesota Lynx":"min","New York Liberty":"ny",
+    "Phoenix Mercury":"phx","Seattle Storm":"sea","Washington Mystics":"wsh",
+    "Golden State Valkyries":"gsv","Portland Fire":"por",
+  },
+};
+function teamLogoUrl(fullName, sport) {
+  const slug = (TEAM_LOGO_SLUG[sport] || {})[fullName];
+  if (!slug) return null;
+  const sportPath = { MLB: "mlb", NBA: "nba", WNBA: "wnba" }[sport] || "mlb";
+  return `https://a.espncdn.com/i/teamlogos/${sportPath}/500/${slug}.png`;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function pctColor(val) {
@@ -183,6 +226,27 @@ function PlayerAvatar({ name, team, headshot, mlbId, size = 52 }) {
           style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center" }} />
       ) : (
         <span style={{ fontFamily: FONT_DISPLAY, fontSize: size * 0.38, fontWeight: 600, color: tc }}>{initials}</span>
+      )}
+    </div>
+  );
+}
+
+function TeamLogo({ name, sport, abbr, size = 52 }) {
+  const tc = teamColor(abbr);
+  const src = teamLogoUrl(name, sport);
+  const [failed, setFailed] = React.useState(false);
+  const show = src && !failed;
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 11, flexShrink: 0, overflow: "hidden",
+      background: C.card2, border: `2px solid ${tc}`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {show ? (
+        <img src={src} alt="" onError={() => setFailed(true)}
+          style={{ width: "78%", height: "78%", objectFit: "contain" }} />
+      ) : (
+        <span style={{ fontFamily: FONT_DISPLAY, fontSize: size * 0.32, fontWeight: 600, color: tc }}>{abbr}</span>
       )}
     </div>
   );
@@ -1150,6 +1214,8 @@ function buildMoneylinePicks(rows) {
     .map(r => ({
       team: r.Team,
       opponent: r.Opponent,
+      teamAbbr: r.Team_Abbr || r.Team.slice(0, 3).toUpperCase(),
+      opponentAbbr: r.Opponent_Abbr || r.Opponent.slice(0, 3).toUpperCase(),
       home: !!r.Home,
       odds: Math.round(Number(r["Avg Odds"]) || 0),
       bestOdds: Math.round(Number(r["Best Odds"]) || 0),
@@ -1159,7 +1225,8 @@ function buildMoneylinePicks(rows) {
       // is the only real signal available, so SC reuses it directly on the
       // same 0-100 scale as the picks "score" field.
       winPct: Math.round(Number(r["Win %"]) || 0),
-      gameTotal: r["Game Total"],
+      gameTotal: r["Game Total"] != null && r["Game Total"] !== "" && !isNaN(r["Game Total"]) ? Number(r["Game Total"]) : null,
+      books: r.Books != null && r.Books !== "" && !isNaN(r.Books) ? Number(r.Books) : null,
       time: r.Time || "",
       sport: r.Sport || "",
     }));
@@ -1188,59 +1255,81 @@ function MoneylineTab() {
       ) : list.length === 0 ? (
         <div style={{ color: C.textDim, fontSize: 13, textAlign: "center", padding: 30 }}>No moneylines available yet.</div>
       ) : (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
         {list.map((pick, i) => (
-          <div key={i} style={{
-            background: C.card, borderRadius: 12, padding: 14,
-            border: `1px solid ${C.border}`,
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: 1 }}>
-                {pick.sport ? pick.sport + " · " : ""}{pick.time}
-              </span>
-              {pick.gameTotal != null && !isNaN(pick.gameTotal) && (
-                <span style={{ fontSize: 10, color: C.textDim, fontVariantNumeric: "tabular-nums" }}>O/U {pick.gameTotal}</span>
-              )}
-            </div>
+          <div key={`${pick.team}-${pick.opponent}-${i}`} style={{
+            background: "#161b22", borderRadius: 14, overflow: "hidden",
+            border: `1px solid ${C.line}`, borderLeft: "none",
+            display: "flex", transition: "border-color 0.15s",
+          }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = C.line2}
+            onMouseLeave={e => e.currentTarget.style.borderColor = C.line}
+          >
+            <div style={{ width: 5, flexShrink: 0, background: teamColor(pick.teamAbbr) }} />
+            <div style={{ flex: 1, padding: "13px 14px", minWidth: 0 }}>
 
-            {/* Matchup row */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: 8,
-                background: "#1a2736", display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontWeight: 800, color: C.green,
-                border: `1.5px solid ${C.green}44`,
-              }}>{pick.team}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
-                  {pick.team} <span style={{ color: C.textDim, fontWeight: 500 }}>{pick.home ? "(H)" : "@"} {pick.opponent}</span>
+              {/* Top row: team info + SC chip */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <TeamLogo name={pick.team} sport={pick.sport} abbr={pick.teamAbbr} size={52} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, letterSpacing: 0.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pick.team}</span>
+                    <span style={{ fontFamily: FONT_MONO, fontSize: 10, color: teamColor(pick.teamAbbr), fontWeight: 700, letterSpacing: 1 }}>{pick.teamAbbr}</span>
+                  </div>
+                  <div style={{ fontFamily: FONT_COND, fontSize: 14, color: C.textDim, marginTop: 2, fontWeight: 500 }}>
+                    <span style={{ fontWeight: 700 }}>{pick.home ? "(H)" : "@"}</span>{" "}
+                    <b style={{ color: C.text, fontWeight: 700 }}>{pick.opponent}</b>
+                  </div>
+                  <div style={{ fontSize: 9, color: C.textDim, marginTop: 5, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>
+                    {pick.sport ? pick.sport + " · " : ""}{pick.time}
+                  </div>
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: pick.odds > 0 ? C.green : C.text, fontVariantNumeric: "tabular-nums" }}>
-                  {pick.odds > 0 ? "+" : ""}{pick.odds}
-                  {pick.bestBook && pick.bestOdds !== pick.odds && (
-                    <span style={{ fontSize: 10, color: C.textDim, fontWeight: 600, marginLeft: 6 }}>
-                      best {pick.bestOdds > 0 ? "+" : ""}{pick.bestOdds} {pick.bestBook}
-                    </span>
-                  )}
+                <div style={{ flexShrink: 0, textAlign: "center", minWidth: 56 }}>
+                  <div style={{ fontFamily: FONT_MONO, fontSize: 23, fontWeight: 800, color: C.text, lineHeight: 1, letterSpacing: -1, fontVariantNumeric: "tabular-nums" }}>
+                    {pick.winPct}%
+                  </div>
+                  <div style={{ marginTop: 5, fontFamily: FONT_COND, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, padding: "2px 0", borderRadius: 5, color: C.textDim, background: C.card2, border: `1px solid ${C.line2}` }}>
+                    SC
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Win% bar */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#1a2736", overflow: "hidden" }}>
-                <div style={{ width: `${pick.winPct}%`, height: "100%", background: C.green, transition: "width 0.3s" }} />
+              {/* Stats row */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 1, marginTop: 13, background: C.line, borderRadius: 9, overflow: "hidden" }}>
+                <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Win%</div>
+                  <div style={{ color: scoreColor(pick.winPct), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                    {pick.winPct}%
+                  </div>
+                </div>
+                <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Odds</div>
+                  <div style={{ color: pick.odds > 0 ? C.green : C.text, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                    {pick.odds > 0 ? "+" : ""}{pick.odds}
+                  </div>
+                </div>
+                <div style={{ flex: 1, background: C.card2, padding: "9px 4px" }}>
+                  <StatCell
+                    value={`${pick.bestOdds > 0 ? "+" : ""}${pick.bestOdds}`}
+                    frac={pick.bestBook || null}
+                    label="Best Odds"
+                    line={null} side={null}
+                  />
+                </div>
+                <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>O/U</div>
+                  <div style={{ color: C.text, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                    {pick.gameTotal != null ? pick.gameTotal : "—"}
+                  </div>
+                </div>
+                <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Books</div>
+                  <div style={{ color: C.text, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                    {pick.books != null ? pick.books : "—"}
+                  </div>
+                </div>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: C.textDim, width: 36, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{pick.winPct}%</span>
-            </div>
 
-            {/* SC score */}
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, color: scoreColor(pick.winPct),
-                background: `${scoreColor(pick.winPct)}15`, padding: "2px 10px", borderRadius: 4,
-                fontVariantNumeric: "tabular-nums",
-              }}>SC {pick.winPct}</div>
             </div>
           </div>
         ))}
