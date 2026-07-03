@@ -478,6 +478,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [search, setSearch] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const SortArrow = ({ col }) => {
     if (sortBy !== col) return null;
     return <span style={{ marginLeft: 2, fontSize: 9 }}>{sortDir === "desc" ? "▼" : "▲"}</span>;
@@ -500,72 +501,99 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
         </div>
       )}
 
-      {/* Model grade filter (MLB only) */}
-      {sport === "MLB" && (
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", gap: 6 }}>
-            {[
-              { key: "all", label: "All" },
-              { key: "LOCK", label: "LOCK" },
-              { key: "STRONG", label: "STRONG" },
-              { key: "LEAN", label: "LEAN" },
-            ].map(g => {
-              const active = gradeFilter === g.key;
-              const tc = g.key === "all" ? { fg: C.text, bg: C.line2, bd: C.line2 } : tierColors(g.key);
-              return (
-                <button key={g.key} onClick={() => { setGradeFilter(g.key); setTierFilter("all"); }} style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
-                  fontSize: 12, fontWeight: 700, letterSpacing: 0.4, transition: "all 0.15s",
-                  background: active ? tc.bg : C.card2,
-                  color: active ? tc.fg : C.textDim,
-                  border: `1px solid ${active ? tc.bd : "transparent"}`,
-                }}>{g.label}</button>
-              );
-            })}
-          </div>
-          {gradeFilter !== "all" && (
-            <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, textAlign: "center" }}>
-              model hit-rate estimate \u00B7 goblins only \u00B7 14-day sample
+      {/* Grade/tier filter — one consolidated dropdown (was two parallel
+          button rows: goblin grade LOCK/STRONG/LEAN and score-tier
+          ELITE/STRONG/DECENT/LEAN, which put "STRONG"/"LEAN" on screen twice
+          and read as one confusing control). Same expand/collapse pattern as
+          the Sort dropdown below. Options stay grouped under labeled headers
+          and internally tagged by system, so the two unrelated STRONG/LEAN
+          scales never merge into a single filter value. MLB gets both groups
+          (goblin grading is MLB-only); other sports get tier only, since
+          v2_tier is computed for every sport but goblins aren't. */}
+      {(() => {
+        const FILTER_GROUPS = sport === "MLB"
+          ? [
+              { system: "grade", header: "Goblin grade", tag: "calibrated %", options: ["LOCK", "STRONG", "LEAN", "FLOOR"] },
+              { system: "tier",  header: "Score tier",    tag: "heuristic",   options: ["ELITE", "STRONG", "DECENT", "LEAN"] },
+            ]
+          : [
+              { system: "tier",  header: "Score tier",    tag: "heuristic",   options: ["ELITE", "STRONG", "DECENT", "LEAN"] },
+            ];
+        const activeSystem = gradeFilter !== "all" ? "grade" : (tierFilter !== "all" ? "tier" : null);
+        const activeValue = activeSystem === "grade" ? gradeFilter : (activeSystem === "tier" ? tierFilter : "All");
+        const activeColor = activeSystem === "grade" ? tierColors(activeValue)
+          : activeSystem === "tier" ? { fg: TIER_COLORS[activeValue] || C.textDim, bg: TIER_BG[activeValue] || C.card2, bd: C.line2 }
+          : { fg: C.text, bg: C.line2, bd: C.line2 };
+        const selectFilter = (system, value) => {
+          setGradeFilter(system === "grade" ? value : "all");
+          setTierFilter(system === "tier" ? value : "all");
+          setFilterOpen(false);
+        };
+        return (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setFilterOpen(o => !o)} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                padding: "8px 11px", borderRadius: 8, cursor: "pointer",
+                fontFamily: FONT_COND, fontSize: 13, fontWeight: 600,
+                background: activeSystem ? activeColor.bg : C.card2,
+                color: activeSystem ? activeColor.fg : C.text,
+                border: `1px solid ${activeSystem ? activeColor.bd : C.line2}`,
+              }}>
+                <span>Filter: <span style={{ fontWeight: 800 }}>{activeValue}</span></span>
+                <span style={{ fontSize: 9 }}>▼</span>
+              </button>
+              {filterOpen && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 5px)", left: 0, right: 0, zIndex: 30,
+                  background: C.card, border: `1px solid ${C.line2}`, borderRadius: 10, padding: 5,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                }}>
+                  <div onClick={() => selectFilter(null, "all")} style={{
+                    padding: "8px 11px", borderRadius: 6, cursor: "pointer",
+                    fontFamily: FONT_COND, fontSize: 14,
+                    color: !activeSystem ? C.gold : C.textDim,
+                  }}
+                    onMouseEnter={e => { if (activeSystem) e.currentTarget.style.color = C.text; }}
+                    onMouseLeave={e => { if (activeSystem) e.currentTarget.style.color = C.textDim; }}
+                  >All</div>
+                  {FILTER_GROUPS.map(g => (
+                    <div key={g.system}>
+                      <div style={{
+                        padding: "10px 11px 3px", fontFamily: FONT_MONO, fontSize: 9,
+                        color: C.dim2 || "#5c6672", letterSpacing: 1, textTransform: "uppercase",
+                      }}>{g.header} <span style={{ opacity: 0.7 }}>· {g.tag}</span></div>
+                      {g.options.map(opt => {
+                        const isActive = activeSystem === g.system && activeValue === opt;
+                        return (
+                          <div key={g.system + opt} onClick={() => selectFilter(g.system, opt)} style={{
+                            padding: "8px 11px", borderRadius: 6, cursor: "pointer",
+                            fontFamily: FONT_COND, fontSize: 14,
+                            color: isActive ? C.gold : C.textDim,
+                          }}
+                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = C.text; }}
+                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = C.textDim; }}
+                          >{opt}</div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Score-tier filter \u2014 v2_tier heuristic (edge/consistency/streak),
-          non-goblin only. Kept in its own row with the TIER_COLORS/TIER_BG
-          palette (not tierColors()) so it never reads as the same control as
-          the goblin grade row above, even though "STRONG"/"LEAN" appear in
-          both: those are two unrelated scales that happen to share labels. */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[
-            { key: "all", label: "All" },
-            { key: "ELITE", label: "ELITE" },
-            { key: "STRONG", label: "STRONG" },
-            { key: "DECENT", label: "DECENT" },
-            { key: "LEAN", label: "LEAN" },
-          ].map(t => {
-            const active = tierFilter === t.key;
-            const tc = t.key === "all"
-              ? { fg: C.text, bg: C.line2, bd: C.line2 }
-              : { fg: TIER_COLORS[t.key] || C.textDim, bg: TIER_BG[t.key] || C.card2, bd: C.line2 };
-            return (
-              <button key={t.key} onClick={() => { setTierFilter(t.key); setGradeFilter("all"); }} style={{
-                flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
-                fontSize: 12, fontWeight: 700, letterSpacing: 0.4, transition: "all 0.15s",
-                background: active ? tc.bg : C.card2,
-                color: active ? tc.fg : C.textDim,
-                border: `1px solid ${active ? tc.bd : "transparent"}`,
-              }}>{t.label}</button>
-            );
-          })}
-        </div>
-        {tierFilter !== "all" && (
-          <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, textAlign: "center" }}>
-            heuristic score tier \u00B7 non-goblin picks
+            {activeSystem === "grade" && (
+              <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, textAlign: "center" }}>
+                model hit-rate estimate · goblins only · 14-day sample
+              </div>
+            )}
+            {activeSystem === "tier" && (
+              <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, textAlign: "center" }}>
+                heuristic score tier · non-goblin picks
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Stat type chips */}
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, WebkitOverflowScrolling: "touch" }}>
@@ -639,7 +667,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                 border: `1px solid ${C.line2}`,
               }}>
                 Sort: <span style={{ color: C.gold }}>{active.label.replace(" pitcher","").replace(" form","")}</span>
-                <span style={{ fontSize: 9, color: C.textDim }}>\u25BC</span>
+                <span style={{ fontSize: 9, color: C.textDim }}>▼</span>
               </button>
               {sortOpen && (
                 <div style={{
