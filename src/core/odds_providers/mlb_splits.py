@@ -60,12 +60,7 @@ def _save_cache(data):
         pass
 
 
-def _normalize(name: str) -> str:
-    """Lowercase, strip accents, collapse spaces — same as scanner.normalize_name."""
-    import unicodedata
-    n = unicodedata.normalize('NFKD', name)
-    n = ''.join(c for c in n if not unicodedata.combining(c))
-    return n.lower().strip()
+from src.sports.mlb.constants import normalize_name as _normalize
 
 
 def _pitcher_hand(pitcher_id: int) -> str:
@@ -78,33 +73,6 @@ def _pitcher_hand(pitcher_id: int) -> str:
         pass
     return ''
 
-
-def _batter_splits(player_id: int, hand: str) -> dict:
-    """
-    Return hitting splits for a batter vs the given pitcher hand ('L' or 'R').
-    Keys: avg, ops, ab, k_pct (all floats/ints, 0 if missing).
-    """
-    sit = 'vr' if hand == 'R' else 'vl'
-    try:
-        r = _http.get(f"{_MLB_API}/people/{player_id}/stats",
-            params={"stats": "statSplits", "sitCodes": sit,
-                    "gameType": "R", "season": 2026},
-            timeout=8)
-        if r.status_code != 200:
-            return {}
-        splits = r.json().get('stats', [{}])[0].get('splits', [])
-        if not splits:
-            return {}
-        s = splits[0].get('stat', {})
-        ab  = int(s.get('atBats', 0) or 0)
-        avg = float(s.get('avg', 0) or 0)
-        ops = float(s.get('ops', 0) or 0)
-        so  = int(s.get('strikeOuts', 0) or 0)
-        pa  = int(s.get('plateAppearances', 0) or 0)
-        k_pct = round(so / pa * 100, 1) if pa > 0 else 0.0
-        return {'avg': avg, 'ops': ops, 'ab': ab, 'k_pct': k_pct}
-    except Exception:
-        return {}
 
 
 def _pitcher_season_stats(pitcher_id: int) -> dict:
@@ -157,122 +125,6 @@ def _team_hitting_stats(team_id: int) -> dict:
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_todays_splits(date_str: str = None) -> dict:
-    """
-    Build a lookup of every batter playing today → their splits vs today's
-    opposing probable pitcher handedness.
-
-    Args:
-        date_str: 'YYYY-MM-DD', defaults to today.
-
-    Returns:
-        {
-          normalized_player_name: {
-            'avg':   float,   # batting average vs pitcher hand
-            'ops':   float,   # OPS vs pitcher hand
-            'ab':    int,     # at-bats vs pitcher hand this season
-            'k_pct': float,   # strikeout % vs pitcher hand
-            'hand':  str,     # 'L' or 'R' (opposing pitcher's throw hand)
-          }
-        }
-    """
-    cached = _load_cache()
-    if cached is not None:
-        print(f"   Using cached MLB splits ({len(cached)} batters)")
-        return cached
-
-    from datetime import date
-    today = date_str or date.today().strftime('%Y-%m-%d')
-    print(f"   Fetching MLB splits for {today}...")
-
-    # Step 1: today's schedule with probable pitchers
-    try:
-        r = _http.get(f"{_MLB_API}/schedule",
-            params={"sportId": 1, "date": today,
-                    "hydrate": "team,probablePitcher"},
-            timeout=12)
-        if r.status_code != 200:
-            print(f"   MLB schedule HTTP {r.status_code}")
-            return {}
-    except Exception as e:
-        print(f"   MLB schedule error: {e}")
-        return {}
-
-    games = r.json().get('dates', [{}])[0].get('games', [])
-    if not games:
-        print("   No MLB games today")
-        return {}
-
-    # --- Step 1: fetch all pitcher hands in parallel ---
-    pitcher_ids = set()
-    for game in games:
-        for side in ('away', 'home'):
-            p = game['teams'][side].get('probablePitcher', {})
-            if p.get('id'):
-                pitcher_ids.add(p['id'])
-
-    hand_map = {}
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futs = {ex.submit(_pitcher_hand, pid): pid for pid in pitcher_ids}
-        for fut in as_completed(futs):
-            pid = futs[fut]
-            try:
-                hand_map[pid] = fut.result()
-            except Exception:
-                hand_map[pid] = ''
-
-    # --- Step 2: collect (batter_id, batter_name, pitcher_hand) tasks ---
-    tasks = []  # (batter_id, batter_name, pitcher_hand)
-    roster_cache = {}
-
-    for game in games:
-        away_team    = game['teams']['away']
-        home_team    = game['teams']['home']
-        away_id      = away_team['team']['id']
-        home_id      = home_team['team']['id']
-        away_pitcher = away_team.get('probablePitcher', {})
-        home_pitcher = home_team.get('probablePitcher', {})
-
-        matchups = []
-        if away_pitcher.get('id') and hand_map.get(away_pitcher['id']):
-            matchups.append((hand_map[away_pitcher['id']], home_id))
-        if home_pitcher.get('id') and hand_map.get(home_pitcher['id']):
-            matchups.append((hand_map[home_pitcher['id']], away_id))
-
-        for pitcher_hand, batter_team_id in matchups:
-            if batter_team_id not in roster_cache:
-                try:
-                    r_roster = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
-                        params={"rosterType": "active", "season": 2026}, timeout=10)
-                    roster_cache[batter_team_id] = (
-                        r_roster.json().get('roster', []) if r_roster.status_code == 200 else []
-                    )
-                except Exception:
-                    roster_cache[batter_team_id] = []
-
-            for p in roster_cache[batter_team_id]:
-                if p.get('position', {}).get('type') != 'Pitcher':
-                    tasks.append((p['person']['id'], p['person']['fullName'], pitcher_hand))
-
-    # --- Step 3: fetch all batter splits in parallel ---
-    result = {}
-    with ThreadPoolExecutor(max_workers=20) as ex:
-        futs = {ex.submit(_batter_splits, bid, hand): (bname, hand)
-                for bid, bname, hand in tasks}
-        for fut in as_completed(futs):
-            bname, hand = futs[fut]
-            try:
-                splits = fut.result()
-                if splits:
-                    splits['hand'] = hand
-                    result[_normalize(bname)] = splits
-            except Exception:
-                pass
-
-    print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
-    _save_cache(result)
-    return result
-
 
 _DEFENSE_CACHE_FILE = os.path.join(CACHE_DIR, 'mlb_defense.json')
 
@@ -308,7 +160,7 @@ def get_defensive_matchups(date_str: str = None) -> tuple:
     try:
         r = _http.get(f"{_MLB_API}/schedule",
             params={"sportId": 1, "date": today,
-                    "hydrate": "team,probablePitcher"},
+                    "hydrate": "probablePitcher"},
             timeout=12)
         if r.status_code != 200:
             return {}, {}
@@ -416,3 +268,189 @@ if __name__ == "__main__":
         for name, s in sorted(splits.items(), key=lambda x: -x[1].get('ops', 0))[:20]:
             print(f"{name:<28} {'v'+s['hand']:>5} {s['ab']:>5} "
                   f"{s['avg']:>6.3f} {s['ops']:>6.3f} {s['k_pct']:>5.1f}%")
+
+
+# New get_todays_splits + Savant helpers. Replaces broken statSplits per-batter calls.
+
+def _parse_savant_float(v):
+    """Savant rate stats arrive as strings like '.278' or '0.831'. Safe float."""
+    if v is None:
+        return 0.0
+    s = str(v).strip().strip('"')
+    if s == '' or s == '.':
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _fetch_savant_hand_table(hand: str) -> dict:
+    """
+    Pull the season hitting leaderboard vs a given pitcher hand from Baseball
+    Savant (one CSV for the whole league). Returns {player_id: {avg,ops,slg,k_pct,ab}}.
+
+    hand: 'R' or 'L' (the PITCHER's throwing hand the batter faced).
+    Savant filter is pitch_hand|<R|L>.
+
+    min=20 (raw PA vs this hand) instead of Savant's default min=q (qualified
+    for the batting title — full-season PA, ~300+, a much higher bar than PA
+    against one specific hand). q covers ~152 batters/hand; 20 covers ~519 —
+    the tradeoff is more small-sample noise at the margin, which is why the
+    caller keeps and exposes 'ab' (actually PA) per player so the UI can show
+    sample size instead of presenting every row as equally reliable.
+    """
+    import csv, io
+    url = ("https://baseballsavant.mlb.com/leaderboard/custom"
+           "?year=2026&type=batter&filter=pitch_hand|" + hand +
+           "&min=20&selections=pa,batting_avg,slg_percent,on_base_plus_slg,k_percent"
+           "&sortColumn=on_base_plus_slg&sortDirection=desc&csv=true")
+    out = {}
+    try:
+        r = _http.get(url, timeout=20)
+        if r.status_code != 200:
+            print(f"   Savant hand={hand} HTTP {r.status_code}")
+            return out
+        reader = csv.DictReader(io.StringIO(r.content.decode('utf-8-sig')))
+        for row in reader:
+            try:
+                pid = int(row.get('player_id') or 0)
+            except (ValueError, TypeError):
+                continue
+            if not pid:
+                continue
+            pa  = int(_parse_savant_float(row.get('pa')))
+            out[pid] = {
+                'avg':   _parse_savant_float(row.get('batting_avg')),
+                'slg':   _parse_savant_float(row.get('slg_percent')),
+                'ops':   _parse_savant_float(row.get('on_base_plus_slg')),
+                'k_pct': _parse_savant_float(row.get('k_percent')),
+                'ab':    pa,   # PA used as volume proxy (Savant gives PA not AB here)
+            }
+    except Exception as e:
+        print(f"   Savant hand={hand} error: {e}")
+    return out
+
+
+def get_todays_splits(date_str: str = None) -> dict:
+    """
+    Build a lookup of every batter playing today -> their season splits vs the
+    handedness of today's opposing probable pitcher.
+
+    Data source: Baseball Savant custom leaderboard (pitch_hand filter).
+    Two CSV pulls total (vs R, vs L) for the whole league, joined to today's
+    rosters by player_id, emitted keyed by normalized name.
+
+    Return contract (unchanged from prior MLB-API version):
+        { normalized_name: {'avg','ops','ab','k_pct','hand'} }
+    """
+    cached = _load_cache()
+    if cached is not None:
+        print(f"   Using cached MLB splits ({len(cached)} batters)")
+        return cached
+
+    from datetime import date
+    today = date_str or date.today().strftime('%Y-%m-%d')
+    print(f"   Fetching MLB splits for {today} (source: Baseball Savant)...")
+
+    # Step 1: today's schedule + probable pitchers (MLB API — this path works)
+    try:
+        r = _http.get(f"{_MLB_API}/schedule",
+            params={"sportId": 1, "date": today,
+                    "hydrate": "probablePitcher"},
+            timeout=12)
+        if r.status_code != 200:
+            print(f"   MLB schedule HTTP {r.status_code}")
+            return {}
+    except Exception as e:
+        print(f"   MLB schedule error: {e}")
+        return {}
+
+    games = r.json().get('dates', [{}])[0].get('games', [])
+    if not games:
+        print("   No MLB games today")
+        return {}
+
+    # Step 2: pitcher hands (parallel) — _pitcher_hand is a /people call, works
+    pitcher_ids = set()
+    for game in games:
+        for side in ('away', 'home'):
+            p = game['teams'][side].get('probablePitcher', {})
+            if p.get('id'):
+                pitcher_ids.add(p['id'])
+
+    hand_map = {}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_pitcher_hand, pid): pid for pid in pitcher_ids}
+        for fut in as_completed(futs):
+            pid = futs[fut]
+            try:
+                hand_map[pid] = fut.result()
+            except Exception:
+                hand_map[pid] = ''
+
+    # Step 3: pull both Savant hand tables ONCE (2 calls for whole league)
+    savant = {
+        'R': _fetch_savant_hand_table('R'),
+        'L': _fetch_savant_hand_table('L'),
+    }
+    if not savant['R'] and not savant['L']:
+        print("   Savant returned no rows — splits unavailable")
+        return {}
+
+    # Step 4: for each batter on a team facing a known-hand starter, emit the
+    # row matching that hand, keyed by normalized name.
+    result = {}
+    roster_cache = {}
+
+    for game in games:
+        away_team = game['teams']['away']
+        home_team = game['teams']['home']
+        away_id   = away_team['team']['id']
+        home_id   = home_team['team']['id']
+        away_p    = away_team.get('probablePitcher', {})
+        home_p    = home_team.get('probablePitcher', {})
+
+        # (pitcher_hand_faced, batter_team_id)
+        matchups = []
+        if away_p.get('id') and hand_map.get(away_p['id']):
+            matchups.append((hand_map[away_p['id']], home_id))
+        if home_p.get('id') and hand_map.get(home_p['id']):
+            matchups.append((hand_map[home_p['id']], away_id))
+
+        for pitcher_hand, batter_team_id in matchups:
+            hand_table = savant.get(pitcher_hand, {})
+            if not hand_table:
+                continue
+            if batter_team_id not in roster_cache:
+                try:
+                    rr = _http.get(f"{_MLB_API}/teams/{batter_team_id}/roster",
+                        params={"rosterType": "active", "season": 2026}, timeout=10)
+                    roster_cache[batter_team_id] = (
+                        rr.json().get('roster', []) if rr.status_code == 200 else []
+                    )
+                except Exception:
+                    roster_cache[batter_team_id] = []
+
+            for p in roster_cache[batter_team_id]:
+                if p.get('position', {}).get('type') == 'Pitcher':
+                    continue
+                person = p.get('person', {})
+                pid    = person.get('id')
+                pname  = person.get('fullName', '')
+                if not pid or not pname:
+                    continue
+                stats = hand_table.get(pid)
+                if not stats:
+                    continue   # not a qualified hitter vs this hand
+                result[_normalize(pname)] = {
+                    'avg':   stats['avg'],
+                    'ops':   stats['ops'],
+                    'ab':    stats['ab'],
+                    'k_pct': stats['k_pct'],
+                    'hand':  pitcher_hand,
+                }
+
+    print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
+    _save_cache(result)
+    return result

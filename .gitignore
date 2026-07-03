@@ -42,6 +42,14 @@ build/
 venv/
 env/
 
+# frontend/dist/ is not a build output despite the name — app.jsx is
+# hand-written source loaded directly via Babel Standalone (see
+# frontend/dist/index.html). Track it; keep the many local .bak* snapshots
+# in that directory (and index.html, for now) ignored.
+!frontend/dist/
+frontend/dist/*
+!frontend/dist/app.jsx
+
 # ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble
