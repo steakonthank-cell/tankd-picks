@@ -275,6 +275,7 @@ function TankdPicks() {
   const [sortBy, setSortBy] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
   const [gradeFilter, setGradeFilter] = useState("all"); // all | LOCK | STRONG | LEAN
+  const [tierFilter, setTierFilter] = useState("all"); // all | ELITE | STRONG | DECENT | LEAN (v2_tier, non-goblin only)
   const [builderLegs, setBuilderLegs] = useState([]);
 
   const [apiPicks, setApiPicks] = useState({});
@@ -331,6 +332,16 @@ function TankdPicks() {
       g.sort((a, b) => (b.model_prob || 0) - (a.model_prob || 0));
       return g;
     }
+    // v2_tier filter — a separate, unvalidated heuristic scale from goblin
+    // grade. Excludes goblin rows: they carry a v2_tier value too (computed
+    // unconditionally server-side) but it's not the scale they're graded on,
+    // so mixing them in here would let e.g. a LOCK goblin double up under an
+    // unrelated "DECENT" bucket.
+    if (tierFilter !== "all") {
+      let t = segmentPicks.filter(p => p.tier === tierFilter && !p.is_goblin);
+      t.sort((a, b) => (b.score || 0) - (a.score || 0));
+      return t;
+    }
     let f = segmentPicks.filter(p => p.stat_type === activeStatType);
     if (activeLine !== null) f = f.filter(p => p.line === activeLine);
     f.sort((a, b) => {
@@ -345,7 +356,7 @@ function TankdPicks() {
       return sortDir === "desc" ? nb - na : na - nb;
     });
     return f;
-  }, [segmentPicks, activeStatType, activeLine, sortBy, sortDir, gradeFilter]);
+  }, [segmentPicks, activeStatType, activeLine, sortBy, sortDir, gradeFilter, tierFilter]);
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(d => d === "desc" ? "asc" : "desc");
@@ -413,6 +424,7 @@ function TankdPicks() {
             lines={lines} activeLine={activeLine} setLine={setLine}
             filtered={filtered} sortBy={sortBy} sortDir={sortDir} toggleSort={toggleSort} setSortBy={setSortBy} setSortDir={setSortDir}
             gradeFilter={gradeFilter} setGradeFilter={setGradeFilter}
+            tierFilter={tierFilter} setTierFilter={setTierFilter}
             addToBuilder={addToBuilder}
           />
         )}
@@ -462,7 +474,7 @@ function TankdPicks() {
 
 // ─── Scanner Tab ─────────────────────────────────────────────────────────────
 
-function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, setStatType, lines, activeLine, setLine, filtered, sortBy, sortDir, toggleSort, setSortBy, setSortDir, addToBuilder, gradeFilter, setGradeFilter }) {
+function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, setStatType, lines, activeLine, setLine, filtered, sortBy, sortDir, toggleSort, setSortBy, setSortDir, addToBuilder, gradeFilter, setGradeFilter, tierFilter, setTierFilter }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [search, setSearch] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
@@ -501,7 +513,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
               const active = gradeFilter === g.key;
               const tc = g.key === "all" ? { fg: C.text, bg: C.line2, bd: C.line2 } : tierColors(g.key);
               return (
-                <button key={g.key} onClick={() => setGradeFilter(g.key)} style={{
+                <button key={g.key} onClick={() => { setGradeFilter(g.key); setTierFilter("all"); }} style={{
                   flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
                   fontSize: 12, fontWeight: 700, letterSpacing: 0.4, transition: "all 0.15s",
                   background: active ? tc.bg : C.card2,
@@ -518,6 +530,42 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
           )}
         </div>
       )}
+
+      {/* Score-tier filter \u2014 v2_tier heuristic (edge/consistency/streak),
+          non-goblin only. Kept in its own row with the TIER_COLORS/TIER_BG
+          palette (not tierColors()) so it never reads as the same control as
+          the goblin grade row above, even though "STRONG"/"LEAN" appear in
+          both: those are two unrelated scales that happen to share labels. */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[
+            { key: "all", label: "All" },
+            { key: "ELITE", label: "ELITE" },
+            { key: "STRONG", label: "STRONG" },
+            { key: "DECENT", label: "DECENT" },
+            { key: "LEAN", label: "LEAN" },
+          ].map(t => {
+            const active = tierFilter === t.key;
+            const tc = t.key === "all"
+              ? { fg: C.text, bg: C.line2, bd: C.line2 }
+              : { fg: TIER_COLORS[t.key] || C.textDim, bg: TIER_BG[t.key] || C.card2, bd: C.line2 };
+            return (
+              <button key={t.key} onClick={() => { setTierFilter(t.key); setGradeFilter("all"); }} style={{
+                flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
+                fontSize: 12, fontWeight: 700, letterSpacing: 0.4, transition: "all 0.15s",
+                background: active ? tc.bg : C.card2,
+                color: active ? tc.fg : C.textDim,
+                border: `1px solid ${active ? tc.bd : "transparent"}`,
+              }}>{t.label}</button>
+            );
+          })}
+        </div>
+        {tierFilter !== "all" && (
+          <div style={{ fontSize: 10, color: C.textDim, marginTop: 6, textAlign: "center" }}>
+            heuristic score tier \u00B7 non-goblin picks
+          </div>
+        )}
+      </div>
 
       {/* Stat type chips */}
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, WebkitOverflowScrolling: "touch" }}>
@@ -570,6 +618,7 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
       {(() => {
         const SORT_OPTS = [
           { key: "score",    label: "Score",  tag: "model" },
+          { key: "ai_proj",  label: "Projection", tag: "AI proj" },
           { key: "ops_vs",   label: "OPS vs pitcher", tag: "matchup" },
           { key: "avg_vs",   label: "BA vs pitcher",  tag: "matchup" },
           { key: "k_pct_vs", label: "K% vs pitcher",  tag: "matchup" },
