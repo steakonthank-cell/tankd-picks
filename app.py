@@ -1931,7 +1931,13 @@ elif sport == "🏀 WNBA":
                 if not _gob_show.empty:
                     _wnba_table(_gob_show, "🟢 Goblin Lines", hide_side=True)
             if not wnba_dem.empty:
-                _wnba_table(wnba_dem, "😈 Demon Lines", hide_side=True)
+                # Only show demons where AI projection matched (has AI_Proj) —
+                # mirrors the goblin filter above; scan_wnba() can emit
+                # Is_Demon rows with AI_Proj=None when no model/player match
+                # was found, same root cause as the earlier goblin fix.
+                _dem_show = wnba_dem.dropna(subset=["AI_Proj"]) if "AI_Proj" in wnba_dem.columns else wnba_dem
+                if not _dem_show.empty:
+                    _wnba_table(_dem_show, "😈 Demon Lines", hide_side=True)
     else:
         _empty()
 
