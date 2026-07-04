@@ -29,6 +29,12 @@ CACHE_DIR      = 'pickfinder_cache'   # reuse same cache dir
 CACHE_FILE     = os.path.join(CACHE_DIR, 'mlb_splits.json')
 CACHE_MINUTES  = 15
 
+# statSplits is prone to bursty stretches of transient 406s (see _batter_splits).
+# Retries use exponential backoff: 2s, 4s, 8s, 16s, 16s (capped) between attempts.
+SPLITS_MAX_ATTEMPTS  = 6
+SPLITS_RETRY_BACKOFF = 2      # seconds; doubles each attempt, capped below
+SPLITS_RETRY_CAP     = 16     # seconds
+
 _MLB_API = "https://statsapi.mlb.com/api/v1"
 
 _http = requests.Session()
@@ -270,7 +276,7 @@ if __name__ == "__main__":
                   f"{s['avg']:>6.3f} {s['ops']:>6.3f} {s['k_pct']:>5.1f}%")
 
 
-def _batter_splits(player_id: int, hand: str) -> dict:
+def _batter_splits(player_id: int, hand: str):
     """
     Return this season's hitting split for one batter vs one pitcher hand
     ('L' or 'R') from the official MLB Stats API. Keys: avg, ops, ab (=PA), k_pct.
@@ -281,6 +287,15 @@ def _batter_splits(player_id: int, hand: str) -> dict:
     and got it replaced (see get_todays_splits) with a Baseball Savant
     leaderboard pull whose pitch_hand filter turned out to be a silent no-op
     instead.
+
+    Return contract: `None` means the lookup failed (HTTP error, timeout,
+    malformed response) — the caller should retry/report this, NOT treat it
+    as "no split". `{}` means MLB responded but has no statSplits rows for
+    this player/hand, i.e. a confirmed zero-PA case. This distinction matters:
+    MLB's statSplits endpoint is prone to transient 406s, and collapsing a
+    failed call into "no data" makes an API outage indistinguishable from a
+    real absence of stats on the board (e.g. everyday players silently
+    showing blank vs-hand splits during an outage).
     """
     sit = 'vr' if hand == 'R' else 'vl'
     try:
@@ -289,7 +304,7 @@ def _batter_splits(player_id: int, hand: str) -> dict:
                     "group": "hitting", "season": 2026, "sportId": 1},
             timeout=8)
         if r.status_code != 200:
-            return {}
+            return None
         splits = r.json().get('stats', [{}])[0].get('splits', [])
         if not splits:
             return {}
@@ -301,7 +316,7 @@ def _batter_splits(player_id: int, hand: str) -> dict:
         k_pct = round(so / pa * 100, 1) if pa > 0 else 0.0
         return {'avg': avg, 'ops': ops, 'ab': pa, 'k_pct': k_pct}
     except Exception:
-        return {}
+        return None
 
 
 def get_todays_splits(date_str: str = None) -> dict:
@@ -407,19 +422,38 @@ def get_todays_splits(date_str: str = None) -> dict:
                 batter_jobs.append((pid, pname, pitcher_hand))
 
     # Step 4: fetch each batter's split vs the hand they actually face today,
-    # in parallel — one call per batter.
-    result = {}
-    with ThreadPoolExecutor(max_workers=16) as ex:
-        futs = {ex.submit(_batter_splits, pid, hand): (pname, hand)
-                for pid, pname, hand in batter_jobs}
-        for fut in as_completed(futs):
-            pname, hand = futs[fut]
-            try:
-                stats = fut.result()
-            except Exception:
-                stats = {}
-            if not stats or not stats.get('ab'):
-                continue   # no PA vs this hand this season
+    # in parallel — one call per batter. `_batter_splits` returns None on a
+    # failed lookup (as opposed to {} for a confirmed zero-PA case), so those
+    # are retried a couple of times before being given up on — that keeps a
+    # transient 406/timeout from silently rendering as "no split" on the board.
+    def _run_batch(jobs):
+        out = {}
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            futs = {ex.submit(_batter_splits, pid, hand): (pid, pname, hand)
+                    for pid, pname, hand in jobs}
+            for fut in as_completed(futs):
+                job = futs[fut]
+                try:
+                    out[job] = fut.result()
+                except Exception:
+                    out[job] = None
+        return out
+
+    result  = {}
+    pending = list(batter_jobs)
+    failed  = []   # jobs that returned None after all retries
+
+    for attempt in range(SPLITS_MAX_ATTEMPTS):
+        if not pending:
+            break
+        outcomes = _run_batch(pending)
+        pending = []
+        for (pid, pname, hand), stats in outcomes.items():
+            if stats is None:
+                pending.append((pid, pname, hand))
+                continue
+            if not stats.get('ab'):
+                continue   # confirmed 0 PA vs this hand this season
             result[_normalize(pname)] = {
                 'avg':   stats['avg'],
                 'ops':   stats['ops'],
@@ -427,6 +461,16 @@ def get_todays_splits(date_str: str = None) -> dict:
                 'k_pct': stats['k_pct'],
                 'hand':  hand,
             }
+        if pending and attempt < SPLITS_MAX_ATTEMPTS - 1:
+            delay = min(SPLITS_RETRY_BACKOFF * (2 ** attempt), SPLITS_RETRY_CAP)
+            print(f"   MLB splits: {len(pending)} lookups failed, "
+                  f"retrying in {delay}s (attempt {attempt + 2}/{SPLITS_MAX_ATTEMPTS})...")
+            time.sleep(delay)
+
+    if pending:
+        failed = [pname for _, pname, _ in pending]
+        print(f"   MLB splits: {len(failed)} lookups still failing after retries "
+              f"(not the same as 'no data' — API errored): {', '.join(failed)}")
 
     print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
     _save_cache(result)
