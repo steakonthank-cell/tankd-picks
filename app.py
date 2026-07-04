@@ -687,6 +687,20 @@ div[data-testid="stNotification"] {
 .ml-book-chip.best-odds { border-color: rgba(0,232,150,0.35); background: rgba(0,232,150,0.06); }
 .ml-book-chip.best-odds .bk-name { color: var(--green); }
 .ml-book-chip.best-odds .bk-odds { color: var(--green); text-shadow: 0 0 10px rgba(0,232,150,0.3); }
+
+/* Run Simulation link-out — deliberately plain/secondary, not a confidence signal */
+.ml-sim-link-row { grid-column: 1 / -1; margin-top: 10px; text-align: center; }
+.ml-sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.6rem; font-weight: 600; letter-spacing: 0.3px;
+    color: var(--text4); text-decoration: none;
+    padding: 5px 13px;
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    background: transparent;
+    transition: all 0.15s ease;
+}
+.ml-sim-link:hover { border-color: var(--text3); color: var(--text3); background: rgba(255,255,255,0.03); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1489,8 +1503,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Deep-link support: ?tab=sim opens straight to the Sim Explorer tab (used by
+# the Moneylines "Run Simulation" link-out). Only seeds the default on first
+# load of the session — doesn't fight the user's own tab clicks afterward.
+if "nav_tab" not in st.session_state:
+    st.session_state["nav_tab"] = "🧪 Sim Explorer" if st.query_params.get("tab") == "sim" else "🏀 NBA"
+
 sport = st.radio("", ["🏀 NBA", "⚾ MLB", "🏀 WNBA", "🎾 Tennis", "💰 Moneylines", "🧪 Sim Explorer"],
-                 horizontal=True, label_visibility="collapsed")
+                 horizontal=True, label_visibility="collapsed", key="nav_tab")
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
@@ -2345,6 +2365,24 @@ elif sport == "💰 Moneylines":
 
                             n_games = len(games)
                             league_logo = _league_logo(sport_key)
+
+                            # ── "Run Simulation" link-out (Sim Explorer, MLB only) ──
+                            # Link-out only — never embed the sim inline here, and never
+                            # touch the win%/odds/books logic above. Sim Explorer only
+                            # knows about *today's* MLB schedule, so pre-selection via
+                            # ?away=&home= is only attempted for today's games; other
+                            # dates fall back to a plain link to the Sim Explorer root.
+                            _sim_base = None
+                            _sim_name_to_id = {}
+                            if sport_key == "MLB":
+                                try:
+                                    _host = st.context.headers.get("Host", "")
+                                    _hostname = _host.split(":")[0] if _host else ""
+                                    if _hostname:
+                                        _sim_base = f"http://{_hostname}:8502"
+                                    from src.sports.mlb.game_sim_live import NAME_TO_ID as _sim_name_to_id
+                                except Exception:
+                                    _sim_base = None
                             st.markdown(
                                 f'<div class="ml-sport-title">'
                                 f'<img src="{league_logo}" />'
@@ -2463,6 +2501,24 @@ elif sport == "💰 Moneylines":
                                     + '</div>'
                                 )
 
+                                # Run Simulation link-out — plain/secondary styling on
+                                # purpose (see .ml-sim-link CSS), so it doesn't read as
+                                # part of the confidence meter above.
+                                _sim_link_html = ""
+                                if _sim_base:
+                                    _away_id = _sim_name_to_id.get(away_name)
+                                    _home_id = _sim_name_to_id.get(home_name)
+                                    _game_date = str(home_r.get("Date", "") or "")
+                                    if _game_date == today and _away_id and _home_id:
+                                        _sim_url = f"{_sim_base}/?tab=sim&away={_away_id}&home={_home_id}"
+                                    else:
+                                        _sim_url = f"{_sim_base}/?tab=sim"
+                                    _sim_link_html = (
+                                        '<div class="ml-sim-link-row">'
+                                        f'<a class="ml-sim-link" href="{_sim_url}" target="_blank" '
+                                        'rel="noopener noreferrer">🧪 Run Simulation ↗</a></div>'
+                                    )
+
                                 logo_img = lambda url, nm: (
                                     f'<img src="{url}" onerror="this.style.display=\'none\'" />'
                                     if url else f'<div style="width:36px;height:36px;background:#1e2837;border-radius:50%;"></div>'
@@ -2541,6 +2597,7 @@ elif sport == "💰 Moneylines":
                                     + home_book_html
                                     + '</div></div>'
                                     + _meter_html
+                                    + _sim_link_html
                                     + '</div>'
                                 )
                                 st.markdown(_card_html, unsafe_allow_html=True)
@@ -2586,8 +2643,27 @@ elif sport == "🧪 Sim Explorer":
             return f'{g["away_team_name"]} @ {g["home_team_name"]}  —  {t} UTC · {g["status"]}'
 
         game_options = {_game_label(g): g for g in games}
-        choice = st.selectbox("Pick one of today's real MLB games", list(game_options.keys()),
-                               key="sim_game_pick")
+        _labels = list(game_options.keys())
+
+        # Deep-link pre-selection from ?away=<team_id>&home=<team_id> (set by
+        # the Moneylines "Run Simulation" link-out). Only affects the
+        # selectbox's initial value on first render of this session — once
+        # "sim_game_pick" exists in session_state, Streamlit ignores `index`
+        # and lets the user's own picks stand.
+        _default_idx = 0
+        _qp_away, _qp_home = st.query_params.get("away"), st.query_params.get("home")
+        if _qp_away and _qp_home:
+            try:
+                _qp_away_i, _qp_home_i = int(_qp_away), int(_qp_home)
+                for _i, _g in enumerate(games):
+                    if _g["away_team_id"] == _qp_away_i and _g["home_team_id"] == _qp_home_i:
+                        _default_idx = _i
+                        break
+            except (ValueError, TypeError):
+                pass
+
+        choice = st.selectbox("Pick one of today's real MLB games", _labels,
+                               index=_default_idx, key="sim_game_pick")
         game = game_options[choice]
 
         c1, c2, c3 = st.columns([1, 1, 2])
