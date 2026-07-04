@@ -1343,6 +1343,90 @@ def _fetch_moneylines_cached(api_key: str):
     except Exception as e:
         return [], str(e)
 
+# ── Sim Explorer (exploratory Monte Carlo — see src/sports/mlb/game_sim*.py) ──
+# NOT a pick source. Fully decoupled: no writes to scan CSVs, no Discord
+# webhook, not read by any other tab. Cached loaders split lineup/rate
+# prep (slow-changing) from Monte Carlo trials (fast, re-rollable) so
+# changing the trial count doesn't force a lineup refetch.
+@st.cache_data(ttl=1800, show_spinner=False)
+def _sim_todays_games():
+    from src.sports.mlb import game_sim_live as gsl
+    return gsl.get_todays_games()
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _sim_training_data():
+    bdf = pd.read_csv(os.path.join(_BASE, "data", "mlb", "processed", "batter_training.csv"))
+    pdf = pd.read_csv(os.path.join(_BASE, "data", "mlb", "processed", "pitcher_training.csv"))
+    return bdf, pdf
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _sim_game_context():
+    from src.core.odds_providers.mlb_context import get_game_context
+    return get_game_context()
+
+@st.cache_data(ttl=1800, show_spinner="Building matchup lineups & player rates…")
+def _load_sim_matchup(game_pk, away_id, home_id, away_prob_name, home_prob_name):
+    """Compose lineups/starters (real-when-posted, presumed-fallback
+    otherwise) and turn them into shrunk, context-adjusted 7-category rate
+    distributions. Pure prep — no Monte Carlo trials here."""
+    from src.sports.mlb import game_sim as gs
+    from src.sports.mlb import game_sim_live as gsl
+
+    bdf, pdf = _sim_training_data()
+    tc, bat_orders, _p2t = _sim_game_context()
+    as_of = bdf["date"].max()
+
+    lineups = gsl.build_matchup_lineups(away_id, home_id, as_of, bdf, pdf, tc, bat_orders)
+    away_probable = {"name": away_prob_name} if away_prob_name else None
+    home_probable = {"name": home_prob_name} if home_prob_name else None
+    away_sp = gsl.resolve_starter(pdf, away_id, as_of, away_probable)
+    home_sp = gsl.resolve_starter(pdf, home_id, as_of, home_probable)
+    lg = gs.compute_league_averages(bdf, pdf, as_of)
+
+    home_park = gsl.team_park_abbr(home_id)
+    weather = gsl.build_weather_dict(tc.get(gsl.team_name(home_id)))
+    umpire = gsl.resolve_umpire(gsl.team_park_abbr(away_id), home_park)
+
+    def _build_side(batters, opp_sp):
+        rates_list, ids, names, n_pa_list, presumed_flags = [], [], [], [], []
+        opp_pid = opp_sp.get("player_id") if opp_sp else None
+        presp = gs.compute_pitcher_pa_rates(pdf, opp_pid, as_of, bdf, window=10) if opp_pid else None
+        p_rates, n_p = presp if presp is not None else (lg["batter"], 0)
+        p_shrunk = gs.shrink_distribution(p_rates, n_p, lg["batter"], gs.PITCHER_K)
+
+        for b in batters:
+            bres = gs.compute_batter_pa_rates(bdf, b["player_id"], as_of, window=20)
+            if bres is None:
+                rates_list.append(lg["batter"]); n_b = 0
+            else:
+                b_rates, n_b = bres
+                b_shrunk = gs.shrink_distribution(b_rates, n_b, lg["batter"], gs.BATTER_K)
+                blended = gs.blend_matchup(b_shrunk, p_shrunk, lg["batter"])
+                rates_list.append(gs.apply_context_multipliers(blended, home_park, weather, umpire))
+            ids.append(b["player_id"]); names.append(b["player_name"])
+            n_pa_list.append(n_b); presumed_flags.append(b.get("presumed", True))
+        return rates_list, ids, names, n_pa_list, presumed_flags
+
+    away_rates, away_ids, away_names, away_n, away_presumed = _build_side(lineups["away"]["lineup"], home_sp)
+    home_rates, home_ids, home_names, home_n, home_presumed = _build_side(lineups["home"]["lineup"], away_sp)
+
+    return {
+        "as_of": str(as_of),
+        "away_rates": away_rates, "away_ids": away_ids, "away_names": away_names,
+        "away_n": away_n, "away_presumed": away_presumed,
+        "home_rates": home_rates, "home_ids": home_ids, "home_names": home_names,
+        "home_n": home_n, "home_presumed": home_presumed,
+        "away_sp": away_sp, "home_sp": home_sp,
+        "umpire": umpire,
+    }
+
+@st.cache_data(ttl=600, show_spinner="Running Monte Carlo trials…")
+def _run_sim_trials(away_rates, home_rates, away_ids, home_ids, n_trials, seed):
+    from src.sports.mlb import game_sim as gs
+    return gs.run_monte_carlo(away_rates, home_rates, away_ids, home_ids,
+                              n_trials=n_trials, seed=seed)
+
+
 @st.cache_data(ttl=86400, show_spinner=False)   # refresh once per day
 def _get_photo_cache() -> dict:
     try:
@@ -1404,7 +1488,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-sport = st.radio("", ["🏀 NBA", "⚾ MLB", "🏀 WNBA", "🎾 Tennis", "💰 Moneylines"],
+sport = st.radio("", ["🏀 NBA", "⚾ MLB", "🏀 WNBA", "🎾 Tennis", "💰 Moneylines", "🧪 Sim Explorer"],
                  horizontal=True, label_visibility="collapsed")
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -2465,3 +2549,182 @@ elif sport == "💰 Moneylines":
                 st.error(f"Error: {e}\n{traceback.format_exc()}")
     else:
         _empty()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SIM EXPLORER (exploratory Monte Carlo — NOT a pick source, NOT backtested)
+# ══════════════════════════════════════════════════════════════════════════════
+elif sport == "🧪 Sim Explorer":
+    st.markdown(
+        f'<div class="page-title-row"><img src="{_league_logo("MLB")}" />'
+        f'<div class="page-title">🧪 Sim Explorer</div></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="page-subtitle">MLB Monte Carlo scenario exploration — today\'s real games only</div>',
+        unsafe_allow_html=True)
+
+    st.error(
+        "🧪 **Exploratory scenario simulation — not a prediction.** This runs thousands of "
+        "simplified Monte Carlo trials over approximate, heavily-smoothed player rates purely to "
+        "generate hypotheses. It is **not a validated pick source**, has **not been backtested**, "
+        "and nothing below is betting advice, an edge, or a confidence level to act on. Read every "
+        "percentage as \"one way this game could unfold under a simplified model,\" not a forecast."
+    )
+
+    games = _sim_todays_games()
+    if not games:
+        st.info("No live MLB schedule could be fetched right now (API hiccup, or no games "
+                "scheduled today). Nothing is shown rather than guessing at matchups.")
+    else:
+        def _game_label(g):
+            t = g["game_time"][11:16] if len(g.get("game_time", "")) >= 16 else "?"
+            return f'{g["away_team_name"]} @ {g["home_team_name"]}  —  {t} UTC · {g["status"]}'
+
+        game_options = {_game_label(g): g for g in games}
+        choice = st.selectbox("Pick one of today's real MLB games", list(game_options.keys()),
+                               key="sim_game_pick")
+        game = game_options[choice]
+
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            n_trials = st.select_slider("Monte Carlo trials", options=[1000, 2000, 5000, 10000],
+                                         value=5000, key="sim_n_trials")
+        with c2:
+            reroll = st.button("🎲 Re-roll", key="sim_reroll",
+                                help="Draw a fresh random sample — inputs stay the same, only the "
+                                     "random draw changes.")
+        with c3:
+            st.caption("Same matchup + same trial count gives the same result until you click "
+                       "Re-roll — that's deliberate (a Monte Carlo result that flickered on every "
+                       "page rerun would look like a bug, not honest variance).")
+
+        seed_key = f"sim_seed_{game['game_pk']}"
+        st.session_state.setdefault(seed_key, 0)
+        if reroll:
+            st.session_state[seed_key] += 1
+        seed = (int(game["game_pk"]) * 1000 + st.session_state[seed_key]) % (2**31 - 1)
+
+        matchup = _load_sim_matchup(
+            game["game_pk"], game["away_team_id"], game["home_team_id"],
+            (game["away_probable"] or {}).get("name"), (game["home_probable"] or {}).get("name"),
+        )
+        result = _run_sim_trials(matchup["away_rates"], matchup["home_rates"],
+                                  matchup["away_ids"], matchup["home_ids"], n_trials, seed)
+
+        today_str = pd.Timestamp.today().strftime("%Y-%m-%d")
+        st.caption(
+            f"Player rates computed from this repo's training data through **{matchup['as_of']}** "
+            f"(today is {today_str} — the underlying dataset can lag days to weeks behind; that gap "
+            f"is real, not hidden, and rates are not refreshed from today's actual games)."
+        )
+
+        def _sp_label(sp):
+            if not sp:
+                return "_unknown_"
+            nm = sp.get("player_name", "unknown")
+            if sp.get("no_rate_data"):
+                return f"{nm}  *(real probable SP, but no rate history in this dataset — league-average fallback used)*"
+            if sp.get("presumed"):
+                return f"{nm}  *(presumed — no confirmed starter posted yet)*"
+            return f"{nm}  (confirmed probable starter)"
+
+        st.markdown(
+            f"**{game['away_team_name']} SP:** {_sp_label(matchup['away_sp'])}  \n"
+            f"**{game['home_team_name']} SP:** {_sp_label(matchup['home_sp'])}"
+        )
+        if any(matchup["away_presumed"]) or any(matchup["home_presumed"]):
+            st.caption(
+                "⚠️ One or more lineup spots below are **presumed** — a naive recent-usage proxy, "
+                "not a real posted batting order — because official MLB lineups for this game "
+                "aren't posted yet (they typically appear ~2-3h before first pitch)."
+            )
+        if matchup["umpire"] is None:
+            st.caption("ℹ️ No home-plate umpire assignment available for this game — umpire adjustment left neutral (1.0×), not guessed.")
+
+        st.markdown(
+            "<div style='font-size:0.82rem;color:#94a3b8;margin:12px 0 6px'>"
+            "⚠️ The win% below assumes each starting pitcher faces the lineup for <b>all 9 innings"
+            "</b> — no bullpen is modeled. A real bullpen substitution would change this number "
+            "materially in either direction. This is a simulation output for exploration, not a "
+            "forecast."
+            "</div>", unsafe_allow_html=True)
+
+        home_pct = result["home_win_pct"]
+        away_pct = result["away_win_pct"]
+        tie_pct = result["tie_pct"]
+        fav_is_home = home_pct >= away_pct
+        fav_name = game["home_team_name"] if fav_is_home else game["away_team_name"]
+        fav_pct = home_pct if fav_is_home else away_pct
+        dog_name = game["away_team_name"] if fav_is_home else game["home_team_name"]
+
+        meter_html = (
+            '<div class="ml-meter-row">'
+            '<div class="ml-meter-labels">'
+            f'<span class="ml-meter-fav" style="color:#60a5fa">{fav_name}</span>'
+            f'<span class="ml-meter-badge" style="color:#60a5fa;border-color:#60a5fa33">'
+            f'sim win-share &nbsp;{fav_pct:.1f}%</span>'
+            f'<span class="ml-meter-dog">{dog_name}</span>'
+            '</div>'
+            '<div class="ml-meter-track">'
+            f'<div class="ml-meter-fill" style="width:{fav_pct:.1f}%;background:'
+            'linear-gradient(90deg,#1d4ed8,#60a5fa)"></div>'
+            '</div>'
+            f'<div style="font-size:0.62rem;color:#64748b;margin-top:6px">'
+            f'tie (no winner after 9, extra innings not simulated): {tie_pct:.1f}%'
+            f'</div>'
+            '</div>'
+        )
+        st.markdown(meter_html, unsafe_allow_html=True)
+
+        st.markdown(
+            f"<div style='margin-top:10px;font-size:0.85rem;color:#cbd5e1'>"
+            f"Simulated runs/game — {game['away_team_name']}: <b>{result['away_runs_mean']:.1f}</b> · "
+            f"{game['home_team_name']}: <b>{result['home_runs_mean']:.1f}</b> · "
+            f"combined: <b>{result['total_runs_mean']:.1f}</b>"
+            f"</div>", unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:14px;font-weight:600;font-size:0.9rem;color:#e2e8f0'>Simulated combined-runs distribution</div>", unsafe_allow_html=True)
+        runs_total = (result["home_runs_arr"] + result["away_runs_arr"]).astype(int)
+        runs_counts = pd.Series(runs_total).value_counts().sort_index()
+        runs_hist = pd.DataFrame({"Combined runs": runs_counts.index,
+                                   "Simulated trials": runs_counts.values}).set_index("Combined runs")
+        st.bar_chart(runs_hist, use_container_width=True)
+
+        def _batter_table(names, n_pa_list, presumed_list, batter_lines):
+            rows = []
+            for i, bl in enumerate(batter_lines):
+                if i >= len(names):
+                    continue
+                n_pa = n_pa_list[i]
+                sample_note = f"{n_pa} PA" if n_pa else "0 PA — league-avg fallback"
+                rows.append({
+                    "Batter": names[i] + (" (presumed lineup slot)" if presumed_list[i] else ""),
+                    "Sim H/gm": round(bl["H_per_game"], 2),
+                    "Sim HR/gm": round(bl["HR_per_game"], 3),
+                    "Sim BB/gm": round(bl["BB_per_game"], 2),
+                    "Sim SO/gm": round(bl["SO_per_game"], 2),
+                    "Sim AVG": round(bl["AVG_sim"], 3),
+                    "Rate sample": sample_note,
+                })
+            return pd.DataFrame(rows)
+
+        st.markdown(f"<div style='margin-top:16px;font-weight:600;font-size:0.9rem;color:#e2e8f0'>{game['away_team_name']} — simulated per-batter lines (avg per simulated game)</div>", unsafe_allow_html=True)
+        st.dataframe(_batter_table(matchup["away_names"], matchup["away_n"], matchup["away_presumed"],
+                                    result["away_batter_lines"]), use_container_width=True, hide_index=True)
+
+        st.markdown(f"<div style='margin-top:10px;font-weight:600;font-size:0.9rem;color:#e2e8f0'>{game['home_team_name']} — simulated per-batter lines (avg per simulated game)</div>", unsafe_allow_html=True)
+        st.dataframe(_batter_table(matchup["home_names"], matchup["home_n"], matchup["home_presumed"],
+                                    result["home_batter_lines"]), use_container_width=True, hide_index=True)
+
+        with st.expander("Assumptions & limitations — read before interpreting anything above", expanded=False):
+            st.markdown("""
+- **Approximate plate appearances**: `PA ≈ AB + BB` for batters (this dataset has no HBP/SF/SH/CI/ROE counts) — roughly a 2-4% undercount of real PA.
+- **Pitcher hit-type mix is estimated, not observed**: this dataset's pitcher hit-allowed column isn't split into 1B/2B/3B, so each pitcher's own hit rate is split into hit types using the *league-average* shape, not this pitcher's own batted-ball tendencies (no Statcast/batted-ball data available here).
+- **Shrinkage constants are off-the-shelf, not fit to this dataset.** Player rates are pulled toward league average using publicly-known, order-of-magnitude stabilization points (not validated against this repo's own historical outcomes). This is a smoothing device, not a calibrated model.
+- **Deterministic base-running** on most contact outcomes, with one explicit exception: a runner on 3rd with fewer than 2 outs scores on a generic ball-in-play out ~50% of the time (a rough stand-in for sac flies/productive outs). Real base-running has far more variability than this.
+- **No bullpen model.** The starting pitcher's rates are used for all 9 innings against that lineup — real starters average ~5-6 innings before relievers enter. This materially affects both the win% and the runs numbers above.
+- **No defense/fielding model** — every ball in play is either a hit of some type or a generic out; no error rate, no defensive positioning, no park-specific batted-ball geometry beyond the park-factor multiplier.
+- **No extra innings.** A 9-inning tie is reported honestly as a tie, not forced to a winner.
+- **Presumed lineup order (when shown) is a naive recent-usage-frequency proxy**, not a real batting-order projection — this dataset has no historical batting-slot column to draw a real order from.
+- **Context-multiplier renormalization is proportional, not source-specific.** When a park/weather/umpire multiplier changes one category's share (e.g. HR), the removed or added probability mass is redistributed proportionally across all other categories, not specifically into/out of a chosen one (e.g. outs).
+- **Today's live schedule/pitchers/lineups come from the MLB Stats API in real time**; player *rate history* comes from this repo's training CSVs, which can lag today's date by days to weeks (shown above) — the simulation blends a live matchup with historically-computed rates, not live in-season stats.
+- This is a hypothesis-generation tool for exploring "what would have to be true" scenarios. It has not been backtested or validated against real outcomes, and nothing in this tab is fed into, or was derived from, this app's Scanner/Moneylines/pick surfaces — it is fully standalone.
+""")
