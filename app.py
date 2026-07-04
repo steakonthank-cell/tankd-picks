@@ -1593,6 +1593,13 @@ elif sport == "⚾ MLB":
             df_section["Pitch_Hand"] = df_section["Pitch_Hand"].fillna("?").replace(
                 {"R": "vs RHP", "L": "vs LHP", "S": "vs Switch"}
             )
+            # Flag season-aggregate fallback rows (Split_Is_Live False) so they
+            # don't read as a real vs-hand split — see mlb_splits.get_todays_splits.
+            if "Split_Is_Live" in df_section.columns:
+                is_fallback = df_section["Split_Is_Live"] == False
+                df_section.loc[is_fallback, "Pitch_Hand"] = (
+                    df_section.loc[is_fallback, "Pitch_Hand"] + " (season)*"
+                )
 
         # ── Split standard / goblin / demon ───────────────────────────────
         if "Is_Goblin" in df_section.columns:
@@ -1622,6 +1629,19 @@ elif sport == "⚾ MLB":
             d = _round_df_mlb(rows[show_cols])
             s = d.style
             if not hide_side and "Side" in d.columns: s = s.map(_style_side, subset=["Side"])
+
+            # Dim + italicize season-fallback split cells so they read as
+            # distinct from a real vs-hand split (Split_Is_Live == False).
+            split_cols = [c for c in ["Pitch Hand", "OPS vs", "AVG vs", "K Pct vs"] if c in d.columns]
+            if split_cols and "Split_Is_Live" in rows.columns:
+                fallback_mask = (rows["Split_Is_Live"] == False).reindex(d.index, fill_value=False)
+                if fallback_mask.any():
+                    def _style_fallback(row):
+                        style = "font-style:italic;color:#f59e0b" if fallback_mask.loc[row.name] else ""
+                        return [style if col in split_cols else "" for col in row.index]
+                    s = s.apply(_style_fallback, axis=1)
+                    st.caption("* season-aggregate stat, not a real vs-hand split — MLB's split endpoint was unavailable when this scan ran.")
+
             st.dataframe(s, use_container_width=True, hide_index=True)
 
         # Top plays cards

@@ -84,9 +84,12 @@ def _pitcher_hand(pitcher_id: int) -> str:
 def _pitcher_season_stats(pitcher_id: int) -> dict:
     """ERA, WHIP, K/9 for a pitcher this season."""
     try:
+        # gameType=R now 406s unconditionally (confirmed 2026-07-04 — broke
+        # sometime after this endpoint was last verified); omitting it still
+        # returns regular-season stats since that's the only season data that
+        # exists during the season.
         r = _http.get(f"{_MLB_API}/people/{pitcher_id}/stats",
-            params={"stats": "season", "group": "pitching",
-                    "gameType": "R", "season": 2026},
+            params={"stats": "season", "group": "pitching", "season": 2026},
             timeout=8)
         if r.status_code != 200:
             return {}
@@ -107,9 +110,9 @@ def _pitcher_season_stats(pitcher_id: int) -> dict:
 def _team_hitting_stats(team_id: int) -> dict:
     """OPS, AVG, K% for a team's lineup this season."""
     try:
+        # gameType=R now 406s unconditionally — see _pitcher_season_stats.
         r = _http.get(f"{_MLB_API}/teams/{team_id}/stats",
-            params={"stats": "season", "group": "hitting",
-                    "gameType": "R", "season": 2026},
+            params={"stats": "season", "group": "hitting", "season": 2026},
             timeout=8)
         if r.status_code != 200:
             return {}
@@ -296,6 +299,15 @@ def _batter_splits(player_id: int, hand: str):
     failed call into "no data" makes an API outage indistinguishable from a
     real absence of stats on the board (e.g. everyday players silently
     showing blank vs-hand splits during an outage).
+
+    UPDATE 2026-07-04: statSplits now 406s unconditionally — confirmed across
+    multiple unrelated players (Tovar, Acuña, Judge, Witt Jr.) and every
+    param combination (with/without season, sportId, gameType). This is no
+    longer the "bursty transient" failure described above; it looks like a
+    sustained MLB-side change. get_todays_splits() now probes once before
+    committing to the full per-player retry loop, and falls back to season
+    aggregate stats (via _batter_season_fallback) when the endpoint is down,
+    instead of burning the full retry/backoff budget for a guaranteed 406.
     """
     sit = 'vr' if hand == 'R' else 'vl'
     try:
@@ -319,6 +331,88 @@ def _batter_splits(player_id: int, hand: str):
         return None
 
 
+def _batter_season_fallback(player_id: int) -> dict:
+    """
+    Season-aggregate AVG/OPS/K% for a batter, with no hand split. Used when
+    statSplits is unavailable so the board shows a real (if less precise)
+    number instead of a blank cell. Keys match _batter_splits minus the
+    handedness dimension: avg, ops, ab (=PA), k_pct.
+
+    Uses the plain `stats=season` query, which stayed healthy throughout the
+    2026-07-04 statSplits outage (unlike `gameType=R`, which also started
+    406ing — see _pitcher_season_stats).
+    """
+    try:
+        r = _http.get(f"{_MLB_API}/people/{player_id}/stats",
+            params={"stats": "season", "group": "hitting", "season": 2026},
+            timeout=8)
+        if r.status_code != 200:
+            return None
+        splits = r.json().get('stats', [{}])[0].get('splits', [])
+        if not splits:
+            return {}
+        s   = splits[0].get('stat', {})
+        pa  = int(s.get('plateAppearances', 0) or 0)
+        avg = float(s.get('avg', 0) or 0)
+        ops = float(s.get('ops', 0) or 0)
+        so  = int(s.get('strikeOuts', 0) or 0)
+        k_pct = round(so / pa * 100, 1) if pa > 0 else 0.0
+        return {'avg': avg, 'ops': ops, 'ab': pa, 'k_pct': k_pct}
+    except Exception:
+        return None
+
+
+def _fill_season_fallback(jobs, result, max_attempts=3):
+    """
+    Populate `result` with season-aggregate stats (is_split=False) for
+    batters whose vs-hand split couldn't be fetched, so the board stays
+    populated instead of going blank while statSplits is down.
+
+    Retries failed lookups (max_attempts rounds, same backoff as the
+    statSplits loop) — a single unretried pass over ~300 concurrent requests
+    was observed dropping ~5-18 batters per run (including everyday players
+    like Cedric Mullins / Miguel Rojas) to ordinary transient failures, which
+    is the exact "silently indistinguishable from no data" problem this
+    fallback exists to avoid.
+    """
+    pending = list(jobs)
+    for attempt in range(max_attempts):
+        if not pending:
+            break
+        outcomes = {}
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            futs = {ex.submit(_batter_season_fallback, pid): (pid, pname, hand)
+                    for pid, pname, hand in pending}
+            for fut in as_completed(futs):
+                job = futs[fut]
+                try:
+                    outcomes[job] = fut.result()
+                except Exception:
+                    outcomes[job] = None
+        pending = []
+        for (pid, pname, hand), stats in outcomes.items():
+            if stats is None:
+                pending.append((pid, pname, hand))
+                continue
+            if not stats.get('ab'):
+                continue   # confirmed 0 PA this season
+            result[_normalize(pname)] = {
+                'avg':      stats['avg'],
+                'ops':      stats['ops'],
+                'ab':       stats['ab'],
+                'k_pct':    stats['k_pct'],
+                'hand':     hand,
+                'is_split': False,   # season aggregate, not a real vs-hand split
+            }
+        if pending and attempt < max_attempts - 1:
+            time.sleep(min(SPLITS_RETRY_BACKOFF * (2 ** attempt), SPLITS_RETRY_CAP))
+
+    if pending:
+        print(f"   MLB splits: season-stat fallback still failing for "
+              f"{len(pending)} batters after retries: "
+              f"{', '.join(p for _, p, _ in pending)}")
+
+
 def get_todays_splits(date_str: str = None) -> dict:
     """
     Build a lookup of every batter playing today -> their season splits vs the
@@ -332,8 +426,13 @@ def get_todays_splits(date_str: str = None) -> dict:
     pa=374/avg=.257 in every case — his combined total, not a single-hand
     split — vs. the real vs-LHP split of pa=93/avg=.282 from this endpoint).
 
-    Return contract (unchanged):
-        { normalized_name: {'avg','ops','ab','k_pct','hand'} }
+    Return contract:
+        { normalized_name: {'avg','ops','ab','k_pct','hand','is_split'} }
+    `is_split` is True for a genuine vs-hand statSplits result, False when
+    statSplits was unavailable and this is a season-aggregate fallback
+    instead (see _batter_season_fallback). Callers that only read
+    avg/ops/ab/k_pct/hand are unaffected; check is_split before treating a
+    number as a real platoon split.
     """
     cached = _load_cache()
     if cached is not None:
@@ -441,7 +540,34 @@ def get_todays_splits(date_str: str = None) -> dict:
 
     result  = {}
     pending = list(batter_jobs)
-    failed  = []   # jobs that returned None after all retries
+
+    # Circuit-breaker probe: a real statSplits outage 406s identically for
+    # every player/hand (confirmed 2026-07-04), so retrying the full batch
+    # SPLITS_MAX_ATTEMPTS times with backoff just burns ~45s for a guaranteed
+    # repeat failure. Probe with one lookup first — if it fails, skip straight
+    # to the season-stat fallback for everyone instead of grinding through
+    # retries that can't succeed. If it succeeds, the endpoint is healthy and
+    # we fall through to the normal per-batter retry loop unchanged (this
+    # still covers a genuinely transient 406 on an individual lookup).
+    if pending:
+        probe_pid, probe_pname, probe_hand = pending[0]
+        probe = _batter_splits(probe_pid, probe_hand)
+        if probe is None:
+            print("   MLB splits: statSplits endpoint appears down (probe 406'd) — "
+                  "using season-stat fallback for all batters instead of retrying")
+            _fill_season_fallback(pending, result)
+            pending = []
+        else:
+            pending = pending[1:]
+            if probe.get('ab'):
+                result[_normalize(probe_pname)] = {
+                    'avg':      probe['avg'],
+                    'ops':      probe['ops'],
+                    'ab':       probe['ab'],
+                    'k_pct':    probe['k_pct'],
+                    'hand':     probe_hand,
+                    'is_split': True,
+                }
 
     for attempt in range(SPLITS_MAX_ATTEMPTS):
         if not pending:
@@ -455,11 +581,12 @@ def get_todays_splits(date_str: str = None) -> dict:
             if not stats.get('ab'):
                 continue   # confirmed 0 PA vs this hand this season
             result[_normalize(pname)] = {
-                'avg':   stats['avg'],
-                'ops':   stats['ops'],
-                'ab':    stats['ab'],
-                'k_pct': stats['k_pct'],
-                'hand':  hand,
+                'avg':      stats['avg'],
+                'ops':      stats['ops'],
+                'ab':       stats['ab'],
+                'k_pct':    stats['k_pct'],
+                'hand':     hand,
+                'is_split': True,
             }
         if pending and attempt < SPLITS_MAX_ATTEMPTS - 1:
             delay = min(SPLITS_RETRY_BACKOFF * (2 ** attempt), SPLITS_RETRY_CAP)
@@ -470,8 +597,13 @@ def get_todays_splits(date_str: str = None) -> dict:
     if pending:
         failed = [pname for _, pname, _ in pending]
         print(f"   MLB splits: {len(failed)} lookups still failing after retries "
-              f"(not the same as 'no data' — API errored): {', '.join(failed)}")
+              f"(not the same as 'no data' — API errored) — using season-stat "
+              f"fallback: {', '.join(failed)}")
+        _fill_season_fallback(pending, result)
 
-    print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games")
+    n_split    = sum(1 for v in result.values() if v.get('is_split', True))
+    n_fallback = len(result) - n_split
+    print(f"   MLB splits loaded: {len(result)} batters across {len(games)} games "
+          f"({n_split} vs-hand splits, {n_fallback} season fallback)")
     _save_cache(result)
     return result

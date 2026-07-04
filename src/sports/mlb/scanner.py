@@ -475,6 +475,10 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
             'AB_vs':       sp_data.get('ab', None),
             'K_Pct_vs':    sp_data.get('k_pct', None),
             'Pitch_Hand':  sp_data.get('hand', ''),
+            # False when OPS_vs/AVG_vs/K_Pct_vs are a season-aggregate
+            # fallback (statSplits unavailable) rather than a real vs-hand
+            # split — see mlb_splits.get_todays_splits.
+            'Split_Is_Live': sp_data.get('is_split', True) if sp_data else None,
             # Defensive matchup — batter rows: opposing pitcher stats
             #                    pitcher rows: opposing lineup stats
             'DEF_ERA':     def_data.get('era',       None) if not is_pitcher else None,
