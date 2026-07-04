@@ -1405,10 +1405,10 @@ def _load_sim_matchup(game_pk, away_id, home_id, away_prob_name, home_prob_name)
                 rates_list.append(gs.apply_context_multipliers(blended, home_park, weather, umpire))
             ids.append(b["player_id"]); names.append(b["player_name"])
             n_pa_list.append(n_b); presumed_flags.append(b.get("presumed", True))
-        return rates_list, ids, names, n_pa_list, presumed_flags
+        return rates_list, ids, names, n_pa_list, presumed_flags, n_p
 
-    away_rates, away_ids, away_names, away_n, away_presumed = _build_side(lineups["away"]["lineup"], home_sp)
-    home_rates, home_ids, home_names, home_n, home_presumed = _build_side(lineups["home"]["lineup"], away_sp)
+    away_rates, away_ids, away_names, away_n, away_presumed, home_sp_n_bf = _build_side(lineups["away"]["lineup"], home_sp)
+    home_rates, home_ids, home_names, home_n, home_presumed, away_sp_n_bf = _build_side(lineups["home"]["lineup"], away_sp)
 
     return {
         "as_of": str(as_of),
@@ -1417,6 +1417,7 @@ def _load_sim_matchup(game_pk, away_id, home_id, away_prob_name, home_prob_name)
         "home_rates": home_rates, "home_ids": home_ids, "home_names": home_names,
         "home_n": home_n, "home_presumed": home_presumed,
         "away_sp": away_sp, "home_sp": home_sp,
+        "away_sp_n_bf": away_sp_n_bf, "home_sp_n_bf": home_sp_n_bf,
         "umpire": umpire,
     }
 
@@ -2616,19 +2617,20 @@ elif sport == "🧪 Sim Explorer":
             f"is real, not hidden, and rates are not refreshed from today's actual games)."
         )
 
-        def _sp_label(sp):
+        def _sp_label(sp, n_bf):
             if not sp:
                 return "_unknown_"
             nm = sp.get("player_name", "unknown")
+            bf_note = f"{n_bf} BF" if n_bf else "0 BF — league-avg fallback"
             if sp.get("no_rate_data"):
-                return f"{nm}  *(real probable SP, but no rate history in this dataset — league-average fallback used)*"
+                return f"{nm}  *(real probable SP, but no rate history in this dataset — league-average fallback used)*  ·  {bf_note}"
             if sp.get("presumed"):
-                return f"{nm}  *(presumed — no confirmed starter posted yet)*"
-            return f"{nm}  (confirmed probable starter)"
+                return f"{nm}  *(presumed — no confirmed starter posted yet)*  ·  {bf_note}"
+            return f"{nm}  (confirmed probable starter)  ·  {bf_note}"
 
         st.markdown(
-            f"**{game['away_team_name']} SP:** {_sp_label(matchup['away_sp'])}  \n"
-            f"**{game['home_team_name']} SP:** {_sp_label(matchup['home_sp'])}"
+            f"**{game['away_team_name']} SP:** {_sp_label(matchup['away_sp'], matchup['away_sp_n_bf'])}  \n"
+            f"**{game['home_team_name']} SP:** {_sp_label(matchup['home_sp'], matchup['home_sp_n_bf'])}"
         )
         if any(matchup["away_presumed"]) or any(matchup["home_presumed"]):
             st.caption(
@@ -2660,7 +2662,7 @@ elif sport == "🧪 Sim Explorer":
             '<div class="ml-meter-labels">'
             f'<span class="ml-meter-fav" style="color:#60a5fa">{fav_name}</span>'
             f'<span class="ml-meter-badge" style="color:#60a5fa;border-color:#60a5fa33">'
-            f'sim win-share &nbsp;{fav_pct:.1f}%</span>'
+            f'✏️ sim only &nbsp;{fav_pct:.1f}%</span>'
             f'<span class="ml-meter-dog">{dog_name}</span>'
             '</div>'
             '<div class="ml-meter-track">'
