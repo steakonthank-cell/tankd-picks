@@ -28,6 +28,13 @@ SPORT_CONFIGS = {
     'WNBA': 'basketball_wnba',
 }
 
+# Sports actually surfaced to users right now (dashboard tab + Discord).
+# fetch_moneylines() itself stays multi-sport (SPORT_CONFIGS above) so
+# switching this app back on for another sport is a one-line addition here,
+# not a re-fetch of data we already pull. Add "NFL" (+ its SPORT_CONFIGS
+# entry) when that's ready instead of hardcoding a sport-removal filter.
+ACTIVE_SPORTS = ['MLB']
+
 TARGET_BOOKS = ['fanduel', 'draftkings', 'betmgm', 'caesars', 'espnbet']
 BASE_URL = "https://api.the-odds-api.com/v4/sports"
 

@@ -285,7 +285,16 @@ async def get_available_stats(sport: str):
 
 @app.get("/api/moneylines")
 async def get_moneylines():
-    """Get today's moneyline picks from the Odds API."""
+    """Get today's moneyline picks from the Odds API.
+
+    Filtered to ACTIVE_SPORTS (src/core/moneylines.py) — fetch_moneylines()
+    itself pulls NBA/MLB/WNBA together, but only MLB is a shipped tab right
+    now, so non-active sports (e.g. WNBA) never reach the dashboard even if
+    they're still in latest.csv. Add a sport there (e.g. NFL) to surface it
+    here without touching this endpoint.
+    """
+    from src.core.moneylines import ACTIVE_SPORTS
+
     ml_path = OUTPUT_DIR / "moneylines" / "latest.csv"
     if not ml_path.exists():
         # Try running moneylines module
@@ -293,11 +302,13 @@ async def get_moneylines():
             sys.path.insert(0, str(BASE_DIR / "src" / "core"))
             from moneylines import get_moneylines
             data = get_moneylines()
+            data = [g for g in data if g.get("Sport") in ACTIVE_SPORTS]
             return {"count": len(data), "games": data}
         except Exception:
             return {"count": 0, "games": []}
-    
+
     df = pd.read_csv(ml_path)
+    df = df[df["Sport"].isin(ACTIVE_SPORTS)]
     games = df.to_dict(orient="records")
     return {"count": len(games), "games": games}
 

@@ -214,9 +214,11 @@ try:
         ml_lines = fetch_moneylines(api_key)
         if ml_lines:
             from zoneinfo import ZoneInfo
+            from src.core.moneylines import ACTIVE_SPORTS
             _ET = ZoneInfo("America/New_York")
             today_str = datetime.now(_ET).strftime("%Y-%m-%d")
-            today_games = [r for r in ml_lines if r.get("Date") == today_str]
+            today_games = [r for r in ml_lines
+                           if r.get("Date") == today_str and r.get("Sport") in ACTIVE_SPORTS]
             if today_games:
                 seen = set()
                 best_ml = []
