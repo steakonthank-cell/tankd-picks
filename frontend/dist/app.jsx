@@ -1336,6 +1336,23 @@ function BuilderTab({ legs, removeLeg, clearAll, picks = [], addToBuilder }) {
 
 // ─── Moneylines Tab ──────────────────────────────────────────────────────────
 
+// MLB Stats API team IDs, mirrored from src/sports/mlb/game_sim_live.py's
+// TEAM_META/NAME_TO_ID (kept in sync manually — team IDs are static
+// reference data, not a projection input). Used only to pre-select a
+// matchup in the Sim Explorer link-out below; never touches pick data/logic.
+const MLB_TEAM_IDS = {
+  "Los Angeles Angels": 108, "Arizona Diamondbacks": 109, "Baltimore Orioles": 110,
+  "Boston Red Sox": 111, "Chicago Cubs": 112, "Cincinnati Reds": 113,
+  "Cleveland Guardians": 114, "Colorado Rockies": 115, "Detroit Tigers": 116,
+  "Houston Astros": 117, "Kansas City Royals": 118, "Los Angeles Dodgers": 119,
+  "Washington Nationals": 120, "New York Mets": 121, "Athletics": 133,
+  "Pittsburgh Pirates": 134, "San Diego Padres": 135, "Seattle Mariners": 136,
+  "San Francisco Giants": 137, "St. Louis Cardinals": 138, "Tampa Bay Rays": 139,
+  "Texas Rangers": 140, "Toronto Blue Jays": 141, "Minnesota Twins": 142,
+  "Philadelphia Phillies": 143, "Atlanta Braves": 144, "Chicago White Sox": 145,
+  "Miami Marlins": 146, "New York Yankees": 147, "Milwaukee Brewers": 158,
+};
+
 // output/moneylines/latest.csv (built by smart_picks.py) keeps only ONE row
 // per game — the recommended side, deduped by taking the highest Win% team
 // per matchup. There is no "other side" odds/probability in this data source,
@@ -1362,6 +1379,10 @@ function buildMoneylinePicks(rows) {
       books: r.Books != null && r.Books !== "" && !isNaN(r.Books) ? Number(r.Books) : null,
       time: r.Time || "",
       sport: r.Sport || "",
+      // Sim Explorer deep-link IDs (MLB only) — null if either team isn't in
+      // MLB_TEAM_IDS, so the link-out falls back to the Sim Explorer root.
+      homeTeamId: r.Home ? (MLB_TEAM_IDS[r.Team] ?? null) : (MLB_TEAM_IDS[r.Opponent] ?? null),
+      awayTeamId: r.Home ? (MLB_TEAM_IDS[r.Opponent] ?? null) : (MLB_TEAM_IDS[r.Team] ?? null),
     }));
 }
 
@@ -1462,6 +1483,27 @@ function MoneylineTab() {
                   </div>
                 </div>
               </div>
+
+              {/* Sim Explorer link-out — exploratory, not a confidence signal.
+                  Deep-links to the matchup when both teams resolve to MLB
+                  team IDs; otherwise falls back to the Sim Explorer root. */}
+              <a
+                href={
+                  pick.awayTeamId != null && pick.homeTeamId != null
+                    ? `http://${window.location.hostname}:8502/?tab=sim&away=${pick.awayTeamId}&home=${pick.homeTeamId}`
+                    : `http://${window.location.hostname}:8502/`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "block", textAlign: "center", marginTop: 8,
+                  padding: "7px 0", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                  letterSpacing: 0.3, textDecoration: "none",
+                  color: C.textDim, background: "transparent", border: `1px solid ${C.line2}`,
+                }}
+              >
+                Run Simulation
+              </a>
 
             </div>
           </div>
