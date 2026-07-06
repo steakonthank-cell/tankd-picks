@@ -857,8 +857,11 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
               </div>
               <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
                 <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Edge</div>
-                <div style={{ color: pick.edge >= 10 ? C.green : pick.edge >= 5 ? C.gold : C.red, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
-                  {pick.edge >= 0 ? "+" : ""}{pick.edge.toFixed(1)}
+                {/* thresholds tuned to the live Edge_Pct/v2_edge percentage distribution
+                    (median ~55%, 75th pct ~74%, 25th pct ~31% as of 2026-07-06 scan) —
+                    not the old raw-unit (AI_Proj-PP_Line) scale this used to be on */}
+                <div style={{ color: pick.edge >= 70 ? C.green : pick.edge >= 40 ? C.gold : C.red, fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                  {pick.edge >= 0 ? "+" : ""}{pick.edge.toFixed(1)}%
                 </div>
               </div>
               <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center" }}>
@@ -1044,7 +1047,7 @@ function SharpTab({ picks, sport }) {
                     <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>Edge</div>
                     <div style={{
                       fontSize: 18, fontWeight: 800, color: C.green, fontVariantNumeric: "tabular-nums",
-                    }}>{p.edge > 0 ? "+" : ""}{p.edge}</div>
+                    }}>{p.edge > 0 ? "+" : ""}{p.edge.toFixed(1)}%</div>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 11, color: C.textDim }}>
@@ -1214,7 +1217,7 @@ function BuilderTab({ legs, removeLeg, clearAll, picks = [], addToBuilder }) {
                   </div>
                   <div style={{ textAlign: "center", minWidth: 38 }}>
                     <div style={{ fontSize: 8, color: C.textDim, textTransform: "uppercase" }}>Edge</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: C.green }}>{(p.edge || 0).toFixed(1)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: C.green }}>{(p.edge || 0).toFixed(1)}%</div>
                   </div>
                   <div style={{ textAlign: "center", minWidth: 30 }}>
                     <div style={{ fontSize: 8, color: C.textDim, textTransform: "uppercase" }}>SC</div>
@@ -1265,7 +1268,7 @@ function BuilderTab({ legs, removeLeg, clearAll, picks = [], addToBuilder }) {
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Avg Edge</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: C.green, fontVariantNumeric: "tabular-nums" }}>+{avgEdge}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: C.green, fontVariantNumeric: "tabular-nums" }}>+{avgEdge}%</div>
               </div>
             </div>
             <div style={{

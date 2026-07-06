@@ -131,11 +131,12 @@ def df_to_picks(df: pd.DataFrame) -> list:
             "win_pct": float(row.get("Con_Over", 0)) if pd.notna(row.get("Con_Over")) else 0,
             "ai_proj": float(row.get("AI_Proj", row.get("ai_proj", 0))) if pd.notna(row.get("AI_Proj", row.get("ai_proj"))) else 0,
             "score": float(row.get("v2_score", row.get("Score", row.get("score", 0)))),
-            "edge": (
-                round(float(row.get("AI_Proj")) - float(row.get("PP_Line")), 2)
-                if pd.notna(row.get("AI_Proj")) and pd.notna(row.get("PP_Line"))
-                else float(row.get("Edge_Pct", 0) or 0)
-            ),
+            # Edge_Pct/v2_edge are true percentages (|proj-line|/line*100, composite-
+            # adjusted) — this is the value the 45%-of-composite-score weighting in
+            # pipeline.py actually refers to. Previously this recomputed a raw
+            # AI_Proj-PP_Line diff in the stat's native units (e.g. "+2.3" Ks), which
+            # is not a percentage and doesn't match what the UI displays it as.
+            "edge": float(row.get("v2_edge", row.get("Edge_Pct", 0)) or 0),
             "tier": row.get("v2_tier", row.get("tier", row.get("Tier", ""))),
             "l5": str(row.get("l5", row.get("L5", ""))),
             "l10": str(row.get("l10", row.get("L10", row.get("Avg_L10", "")))),
