@@ -47,6 +47,19 @@ DIRECTION_GOBLIN_GRADES = ("LOCK", "STRONG", "LEAN")
 # Warn if the real vs-hand-split share of hitter rows drops below this --
 # signals the MLB statSplits endpoint may be down again.
 SPLIT_COVERAGE_WARN = 0.5
+# statSplits has 406'd unconditionally since this date -- a confirmed
+# sustained MLB-side outage (re-probed live on 2026-07-28: still down across
+# every param/header combination, including the /people hydrate route), not
+# a bug in this codebase. src/core/odds_providers/mlb_splits.py already
+# degrades gracefully to a season-aggregate fallback (is_split=False) when
+# this happens, which is why real_pct sits at 0% instead of the board going
+# blank. A prior attempt to replace statSplits with a Baseball Savant
+# leaderboard pull was reverted for being worse: its hand filter silently
+# no-op'd and served combined-season stats mislabeled as real splits. If
+# real_pct is still 0% below, that's this known outage, not a new problem --
+# it's only worth investigating further if "No split data" also grows, since
+# that would mean the fallback itself started failing.
+KNOWN_SPLIT_OUTAGE_SINCE = "2026-07-04"
 # Safety ceiling in api/server.py's _cap_per_stat(); a bucket sitting at or
 # near it may be getting silently truncated rather than fully served.
 CAP_PER_STAT = 1000
@@ -253,7 +266,11 @@ def main():
         marker = "⚠ " if split_stats["warn"] else ""
         print(f"{marker}Real vs-hand splits: {real}  |  Season fallback: {fallback}  |  No split data: {blank}  |  Real-split share: {pct_s}")
         if split_stats["warn"]:
-            print(f"WARN: real-split share is below {SPLIT_COVERAGE_WARN * 100:.0f}% -- MLB's statSplits endpoint may be degraded again.")
+            print(f"WARN: real-split share is below {SPLIT_COVERAGE_WARN * 100:.0f}% -- "
+                  f"known MLB statSplits outage since {KNOWN_SPLIT_OUTAGE_SINCE}, season-aggregate "
+                  f"fallback is active and working as designed (see src/core/odds_providers/mlb_splits.py). "
+                  f"Only investigate further if 'No split data' also grows -- that would mean the "
+                  f"fallback itself is failing, which is a new problem.")
 
     print("\n" + "=" * 70)
     print("CHECK 3: Edge/proj sanity")
