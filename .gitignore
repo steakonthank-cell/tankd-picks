@@ -37,6 +37,10 @@ data/mlb/processed/*.csv
 sim_backtest_calibration_games.csv
 sim_backtest_calibration_summary.txt
 
+# ── Manual/pre-refresh backups (2026-07-28 incident hygiene) ─────────────────
+*.bak-[0-9]*
+*.pre_refresh_backup
+
 # ── Logs ──────────────────────────────────────────────────────────────────────
 logs/
 backfill_fetch.log

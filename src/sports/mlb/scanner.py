@@ -20,6 +20,7 @@ from src.core.odds_providers.prizepicks  import PrizePicksClient
 from src.core.odds_providers.pickfinder  import PickFinderClient
 from src.core.odds_providers.mlb_splits  import get_todays_splits, get_defensive_matchups
 from src.core.odds_providers.mlb_context import get_game_context, pa_factor
+from src.core.pa_trailing import pa_volume_mult
 from src.sports.mlb.config   import STAT_MAP, MODEL_QUALITY, ACTIVE_TARGETS, PITCHER_STATS, COMBO_STATS
 from src.sports.mlb.mappings import normalize_name, STAT_MAPPING, VOLATILITY_MAP
 from src.sports.mlb.train    import (
@@ -46,6 +47,54 @@ MLB_API = "https://statsapi.mlb.com/api/v1"
 # ---------------------------------------------------------------------------
 # DATA & MODEL LOADING
 # ---------------------------------------------------------------------------
+
+_TEAM_ABBR = {
+    "Arizona Diamondbacks":"ARI","Athletics":"ATH","Atlanta Braves":"ATL","Baltimore Orioles":"BAL",
+    "Boston Red Sox":"BOS","Chicago Cubs":"CHC","Chicago White Sox":"CWS","Cincinnati Reds":"CIN",
+    "Cleveland Guardians":"CLE","Colorado Rockies":"COL","Detroit Tigers":"DET","Houston Astros":"HOU",
+    "Kansas City Royals":"KC","Los Angeles Angels":"LAA","Los Angeles Dodgers":"LAD","Miami Marlins":"MIA",
+    "Milwaukee Brewers":"MIL","Minnesota Twins":"MIN","New York Mets":"NYM","New York Yankees":"NYY",
+    "Philadelphia Phillies":"PHI","Pittsburgh Pirates":"PIT","San Diego Padres":"SD","San Francisco Giants":"SF",
+    "Seattle Mariners":"SEA","St. Louis Cardinals":"STL","Tampa Bay Rays":"TB","Texas Rangers":"TEX",
+    "Toronto Blue Jays":"TOR","Washington Nationals":"WSH",
+}
+def _abbr(full):
+    return _TEAM_ABBR.get(full, full[:3].upper() if full else "")
+
+# ── MLB player-id map for headshots (cached from stats API) ──
+_PLAYER_IDS = None
+def _load_player_ids():
+    global _PLAYER_IDS
+    if _PLAYER_IDS is not None:
+        return _PLAYER_IDS
+    import json, os, time
+    cache = "data/mlb/player_ids.json"
+    try:
+        # refresh if missing or older than 7 days
+        fresh = os.path.exists(cache) and (time.time() - os.path.getmtime(cache) < 7*86400)
+        if fresh:
+            _PLAYER_IDS = json.load(open(cache))
+            return _PLAYER_IDS
+    except Exception:
+        pass
+    ids = {}
+    try:
+        import requests
+        r = requests.get("https://statsapi.mlb.com/api/v1/sports/1/players",
+                         params={"season": 2026}, timeout=15)
+        if r.status_code == 200:
+            for p in r.json().get("people", []):
+                nm = normalize_name(p.get("fullName", ""))
+                if nm and p.get("id"):
+                    ids[nm] = p["id"]
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        json.dump(ids, open(cache, "w"))
+    except Exception as _e:
+        print(f"[scanner] player-id map fetch failed: {_e}")
+    _PLAYER_IDS = ids
+    return _PLAYER_IDS
+
+
 
 def load_data():
     batters  = None
@@ -256,6 +305,17 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
 
     print(f"   PrizePicks: {len(pp_df)} MLB props")
 
+    # --- Snapshot the real offered board (ground truth for grading) ---
+    try:
+        import os as _os
+        _lines_dir = "output/mlb/lines"
+        _os.makedirs(_lines_dir, exist_ok=True)
+        _snap_cols = [c for c in ["Player", "League", "Stat", "Line", "Date", "OddsType"] if c in pp_df.columns]
+        pp_df[_snap_cols].to_csv(f"{_lines_dir}/lines_{date_str}.csv", index=False)
+        print(f"   Snapshot saved: {_lines_dir}/lines_{date_str}.csv ({len(pp_df)} rows)")
+    except Exception as _e:
+        print(f"   (snapshot failed: {_e})")
+
     pp_df['stat_code'] = pp_df['Stat'].map(STAT_MAPPING)
 
     # Report props that exist but aren't modeled (combos, unsupported stats)
@@ -295,6 +355,9 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         print(f"   Game context skipped: {_ce}")
 
     results = []
+    scored_count = 0
+    excluded_missing_history = 0
+    excluded_missing_history_names = set()
 
     for _, row in pp_df.iterrows():
         player_name  = row['Player']
@@ -327,6 +390,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
                         (df_pitchers['date'] < cutoff)
                     ].tail(20)
             if len(history) < 2:
+                excluded_missing_history += 1
+                excluded_missing_history_names.add(player_name)
                 continue
             feats = build_pitcher_features_for_player(history, is_home=1)
             feat_list = PITCHER_FEATURES
@@ -346,6 +411,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
                         (df_batters['date'] < cutoff)
                     ].tail(30)
             if len(history) < 2:
+                excluded_missing_history += 1
+                excluded_missing_history_names.add(player_name)
                 continue
             feats = build_batter_features_for_player(history, is_home=1)
             feat_list = BATTER_FEATURES
@@ -385,6 +452,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
             except Exception:
                 continue
 
+        scored_count += 1
+
         # --- Game context: park factor / wind / batting order PA adjustment ---
         player_team  = player_to_team.get(normalize_name(player_name), '')
         ctx          = team_ctx.get(player_team, {})
@@ -400,9 +469,12 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         # Wind boost (HR, TB, HRR — power props — on outdoor parks)
         wind_mult = ctx.get('wind_boost', 1.0) if stat_code in ('HR', 'TB', 'HRR') else 1.0
 
-        # Batting order PA adjustment (counting stats, not pitcher props)
-        bat_pos  = bat_orders.get(normalize_name(player_name), {}).get('bat_order', 0)
-        pa_mult  = pa_factor(bat_pos) if (not is_pitcher and bat_pos > 0) else 1.0
+        # PA volume adjustment — trailing PA/game from boxscore archive
+        # (hitter counting stats only; applied pre-side since it shifts the projection itself)
+        if (not is_pitcher) and stat_code in ('H', 'TB', 'R', 'HRR'):
+            pa_mult, pa_trail = pa_volume_mult(normalize_name(player_name), date_str)
+        else:
+            pa_mult, pa_trail = 1.0, None
 
         # Apply all multipliers to raw model projection
         proj = proj * pf_mult * wind_mult * pa_mult
@@ -447,6 +519,8 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
 
         result = {
             'Player':      player_name,
+            'Team':        _abbr(player_to_team.get(normalize_name(player_name), '')),
+            'MLB_ID':      _load_player_ids().get(normalize_name(player_name), ''),
             'Stat':        stat_code,
             'Stat_Label':  stat_display,
             'Is_Pitcher':  is_pitcher,
@@ -490,8 +564,9 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
             'OPP_TEAM':    def_data.get('opp_team',  '')   if is_pitcher else '',
             # Game context (park factor, totals, weather, batting order)
             'PF_Mult':     round(pf_mult, 3),
-            'BAT_POS':     bat_pos if bat_pos > 0 else None,
+            'BAT_POS':     None,
             'PA_Mult':     round(pa_mult, 3),
+            'PA_Trail':    pa_trail,
             'Game_Total':  ctx.get('total'),
             'Implied':     ctx.get('implied'),
             'Wind_Speed':  ctx.get('wind_speed'),
@@ -500,6 +575,12 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
             'Is_Indoor':   ctx.get('is_indoor', False),
         }
         results.append(result)
+
+    print(f"   scored {scored_count}, excluded {excluded_missing_history} for missing history", flush=True)
+    if excluded_missing_history_names:
+        sample = sorted(excluded_missing_history_names)[:15]
+        more = f" (+{len(excluded_missing_history_names) - len(sample)} more)" if len(excluded_missing_history_names) > len(sample) else ""
+        print(f"   excluded for missing history: {', '.join(sample)}{more}", flush=True)
 
     return pd.DataFrame(results)
 
@@ -613,7 +694,7 @@ def _print_section(df, title, has_pf, any_move, has_splits, has_def, has_lineup,
             base += f"{sep}{col1:>5}{sep}{col2:>5}"
         if has_lineup:
             pos = row.get('BAT_POS')
-            pos_s = f"{int(pos):>3}" if pos is not None else " --"
+            pos_s = f"{int(pos):>3}" if (pos is not None and pd.notna(pos)) else " --"
             base += f"{sep}{pos_s}"
         if has_ctx:
             gt  = row.get('Game_Total')
