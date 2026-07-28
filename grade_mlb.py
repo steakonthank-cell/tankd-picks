@@ -119,9 +119,21 @@ def main():
             print(f"  {date}: ERROR {e}")
     if allr:
         full = pd.concat(allr, ignore_index=True)
-        full.to_csv("output/mlb/graded/training_data.csv", index=False)
+        out_path = "output/mlb/graded/training_data.csv"
+        # Merge into the existing file instead of replacing it outright, so a
+        # partial-date run (e.g. re-grading the last few days) can't wipe out
+        # historical rows for dates it never touched.
+        run_dates = set(full["scan_date"].unique())
+        if os.path.exists(out_path):
+            existing = pd.read_csv(out_path)
+            existing = existing[~existing["scan_date"].isin(run_dates)]
+            merged = pd.concat([existing, full], ignore_index=True)
+        else:
+            merged = full
+        merged = merged.sort_values("scan_date").reset_index(drop=True)
+        merged.to_csv(out_path, index=False)
         d = full[full["result"]!="Push"]
-        print(f"\nTOTAL graded: {len(full)} | saved training_data.csv")
+        print(f"\nTOTAL graded this run: {len(full)} | training_data.csv now has {len(merged)} rows across {merged['scan_date'].nunique()} days")
         print("\nHit rate by OddsType (push excluded):")
         print(d.groupby("odds_type")["hit"].agg(["mean","count"]).round(3).to_string())
         print("\nGoblin hit rate by Tier:")
