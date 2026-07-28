@@ -120,11 +120,23 @@ def main():
             print(f"  {date}: ERROR {e}")
     if all_rows:
         full = pd.concat(all_rows, ignore_index=True)
-        full.to_csv("output/mlb/graded/training_data.csv", index=False)
-        print(f"\nTOTAL: {len(full)} graded picks across {len(all_rows)} days")
-        print(f"Overall hit rate: {full['hit'].mean():.3f}")
-        print(f"Saved -> output/mlb/graded/training_data.csv")
-        print(f"\nHit rate by tier:")
+        out_path = "output/mlb/graded/training_data.csv"
+        # Merge into the existing file instead of replacing it outright, so a
+        # partial-date run (e.g. re-grading just a few days) can't wipe out
+        # historical rows for dates it never touched.
+        run_dates = set(full["scan_date"].unique())
+        if os.path.exists(out_path):
+            existing = pd.read_csv(out_path)
+            existing = existing[~existing["scan_date"].isin(run_dates)]
+            merged = pd.concat([existing, full], ignore_index=True)
+        else:
+            merged = full
+        merged = merged.sort_values("scan_date").reset_index(drop=True)
+        merged.to_csv(out_path, index=False)
+        print(f"\nTOTAL graded this run: {len(full)} | training_data.csv now has {len(merged)} rows across {merged['scan_date'].nunique()} days")
+        print(f"Overall hit rate (this run): {full['hit'].mean():.3f}")
+        print(f"Saved -> {out_path}")
+        print(f"\nHit rate by tier (this run):")
         if "Tier" in full.columns:
             print(full.groupby("Tier")["hit"].agg(["mean", "count"]).round(3).to_string())
 
