@@ -44,6 +44,53 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
+# Bust%-based goblin gate. Goblins bypass the edge_pct threshold below (they're
+# a discounted-payout near-lock market, not an edge play), but "bypass" used to
+# mean *any* goblin ships regardless of how often the player actually misses
+# that exact line. Backtested 2026-07-30 against 30,831 point-in-time graded
+# goblin-Over picks (output/mlb/graded/training_data.csv, bust% computed only
+# from games before each pick's own scan_date): rejecting bust% > these
+# thresholds kept a 66.8% hit rate vs. 58.1% for the rejected tail, and that
+# gap held in every stat bucket individually, not just in aggregate.
+#
+# Demons are deliberately NOT covered by this map — they run ~20% hit rate by
+# design (inflated line, boosted payout), so a goblin-calibrated threshold
+# would reject nearly the whole demon category. That needs its own backtest.
+#
+# HFS/PFS are also not covered here: their value depends on the real
+# PrizePicks fantasy-scoring weights (WEIGHTED_COMBO_STATS), which isn't
+# committed yet — they didn't exist as goblin picks historically either, so
+# there's nothing to backtest against. Add them once that formula lands.
+#
+# R and BB are intentionally omitted: R goblins bust ~50% of the time by
+# nature (scoring a run is close to a coinflip), so gating them is a product
+# call about whether R goblins should exist at all, not a threshold tuning
+# problem. BB had only 1 live sample on the board the day this was built —
+# not enough to calibrate.
+GOBLIN_BUST_MIN_N     = 8       # below this many career-to-date games, skip the gate (old bypass stands)
+GOBLIN_BUST_THRESHOLD = {
+    'H': 45.0, 'TB': 45.0, 'SO': 45.0, 'HRR': 45.0, 'RBI': 45.0,
+    'K': 50.0, 'ER': 50.0, 'OUTS': 50.0,
+}
+
+
+def _goblin_bust_pct(stat_code, pp_line, full_history):
+    """Season-to-date rate (%) of games where the actual stat fell short of
+    pp_line, i.e. how often this exact goblin would have busted. Returns
+    (None, n) if the stat can't be scored from this player's history (a
+    combo component is missing from the columns available)."""
+    n = len(full_history)
+    if stat_code in COMBO_STATS:
+        comps = COMBO_STATS[stat_code]
+        if not all(c in full_history.columns for c in comps):
+            return None, n
+        vals = sum(full_history[c] for c in comps)
+    elif stat_code in full_history.columns:
+        vals = full_history[stat_code]
+    else:
+        return None, n
+    return (vals < pp_line).mean() * 100, n
+
 
 # ---------------------------------------------------------------------------
 # DATA & MODEL LOADING
@@ -378,18 +425,20 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         if is_pitcher:
             if df_pitchers is None:
                 continue
-            history = df_pitchers[
+            full_history = df_pitchers[
                 (df_pitchers['clean_name'] == clean) &
                 (df_pitchers['date'] < cutoff)
-            ].tail(20)
+            ]
+            history = full_history.tail(20)
             if len(history) < 3:
                 names = df_pitchers['clean_name'].unique()
                 best  = _fuzzy_match(clean, names)
                 if best:
-                    history = df_pitchers[
+                    full_history = df_pitchers[
                         (df_pitchers['clean_name'] == best) &
                         (df_pitchers['date'] < cutoff)
-                    ].tail(20)
+                    ]
+                    history = full_history.tail(20)
             if len(history) < 2:
                 excluded_missing_history += 1
                 excluded_missing_history_names.add(player_name)
@@ -399,24 +448,35 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         else:
             if df_batters is None:
                 continue
-            history = df_batters[
+            full_history = df_batters[
                 (df_batters['clean_name'] == clean) &
                 (df_batters['date'] < cutoff)
-            ].tail(30)
+            ]
+            history = full_history.tail(30)
             if len(history) < 3:
                 names = df_batters['clean_name'].unique()
                 best  = _fuzzy_match(clean, names)
                 if best:
-                    history = df_batters[
+                    full_history = df_batters[
                         (df_batters['clean_name'] == best) &
                         (df_batters['date'] < cutoff)
-                    ].tail(30)
+                    ]
+                    history = full_history.tail(30)
             if len(history) < 2:
                 excluded_missing_history += 1
                 excluded_missing_history_names.add(player_name)
                 continue
             feats = build_batter_features_for_player(history, is_home=1)
             feat_list = BATTER_FEATURES
+
+        # Goblin bust% gate — see GOBLIN_BUST_THRESHOLD above. Checked before
+        # spending a model prediction on a pick that's going to be dropped.
+        if is_goblin:
+            gate_threshold = GOBLIN_BUST_THRESHOLD.get(stat_code)
+            if gate_threshold is not None:
+                bust_pct, n_hist = _goblin_bust_pct(stat_code, pp_line, full_history)
+                if bust_pct is not None and n_hist >= GOBLIN_BUST_MIN_N and bust_pct > gate_threshold:
+                    continue
 
         feat_cols = [f for f in feat_list if f in feats]
 
