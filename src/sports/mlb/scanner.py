@@ -24,6 +24,7 @@ from src.core.pa_trailing import pa_volume_mult
 from src.sports.mlb.config   import STAT_MAP, MODEL_QUALITY, ACTIVE_TARGETS, PITCHER_STATS, COMBO_STATS
 from src.sports.mlb.mappings import normalize_name, STAT_MAPPING, VOLATILITY_MAP
 from src.sports.mlb.train    import (
+    LOG_TRANSFORM_TARGETS,
     BATTER_FEATURES, PITCHER_FEATURES,
     BATTER_ROLL_STATS, PITCHER_ROLL_STATS,
     BATTER_WINDOWS, PITCHER_WINDOWS,
@@ -427,6 +428,13 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
                 model_cols = feat_cols
             return pd.DataFrame([{c: feats.get(c, 0.0) for c in model_cols}])
 
+        def _predict_stat(stat, model):
+            """Raw model output, back-transformed out of log1p-space for targets
+            trained that way (ER/HR/BB/SB) — train.py fits log1p(y) for these,
+            so the model's own output is in log-space until expm1'd."""
+            raw = float(model.predict(_make_feat_vec(model, feats))[0])
+            return np.expm1(raw) if stat in LOG_TRANSFORM_TARGETS else raw
+
         # Combo stats — predicted by summing component model projections
         if stat_code in COMBO_STATS:
             component_codes = COMBO_STATS[stat_code]   # e.g. ['H', 'R', 'RBI']
@@ -437,7 +445,7 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
                     skip = True
                     break
                 try:
-                    proj += float(models[comp].predict(_make_feat_vec(models[comp], feats))[0])
+                    proj += _predict_stat(comp, models[comp])
                 except Exception:
                     skip = True
                     break
@@ -447,7 +455,7 @@ def get_all_projections(df_batters, df_pitchers, models, date_str=None):
         else:
             model = models[stat_code]
             try:
-                proj = float(model.predict(_make_feat_vec(model, feats))[0])
+                proj = _predict_stat(stat_code, model)
                 proj = max(0.0, proj)
             except Exception:
                 continue
