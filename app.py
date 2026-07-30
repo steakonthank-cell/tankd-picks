@@ -1705,6 +1705,13 @@ elif sport == "⚾ MLB":
                 df_section.loc[is_fallback, "Pitch_Hand"] = (
                     df_section.loc[is_fallback, "Pitch_Hand"] + " (season)*"
                 )
+                # AVG_vs/OPS_vs/K_Pct_vs are season-aggregate numbers when the
+                # split isn't live — showing them under a "vs RHP/LHP" header
+                # reads as a real split and is worse than showing nothing, so
+                # blank them instead of just dimming the text color.
+                for sc in ["OPS_vs", "AVG_vs", "K_Pct_vs"]:
+                    if sc in df_section.columns:
+                        df_section.loc[is_fallback, sc] = None
 
         # ── Split standard / goblin / demon ───────────────────────────────
         if "Is_Goblin" in df_section.columns:
