@@ -162,9 +162,14 @@ def df_to_picks(df: pd.DataFrame) -> list:
                 round(float(row.get("PF_Mult")) * 100)
                 if pd.notna(row.get("PF_Mult")) else int(row.get("park_factor", 100))
             ),
-            "fatigue_score": int(row.get("fatigue_score", 0)),
             "weather_adj": float(row.get("weather_adj", 1.0)),
-            "umpire_adj": float(row.get("umpire_adj", 1.0)),
+            # fatigue_score and umpire_adj are deliberately not sent: both
+            # are computed in features/pipeline.py against a game_context
+            # dict that nothing in this codebase ever populates (grepped —
+            # zero callers pass it), so they are structurally always the
+            # neutral default (fatigue_score=0, umpire_adj=1.0) on every
+            # pick, never a real signal. Re-add once game_context is wired
+            # up to real per-game data.
             # goblin model
             "is_goblin": is_goblin,
             "is_demon": bool(row.get("Is_Demon", False)),

@@ -975,12 +975,6 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                       <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{pick.game_total}</div>
                     </div>
                   )}
-                  {pick.fatigue_score != null && (
-                    <div style={{ background: "rgba(100,116,139,0.08)", borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
-                      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>Fatigue</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: pick.fatigue_score >= 30 ? C.red : pick.fatigue_score <= 10 ? C.green : C.text }}>{pick.fatigue_score}</div>
-                    </div>
-                  )}
                   {pick.streak != null && (
                     <div style={{ background: "rgba(100,116,139,0.08)", borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
                       <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>Streak</div>
