@@ -41,6 +41,9 @@ sim_backtest_calibration_summary.txt
 *.bak-[0-9]*
 *.pre_refresh_backup
 
+# ── Retrain data-readiness gate state (self-seeds from documented constants) ─
+data/mlb/processed/.retrain_baseline.json
+
 # ── Logs ──────────────────────────────────────────────────────────────────────
 logs/
 backfill_fetch.log
