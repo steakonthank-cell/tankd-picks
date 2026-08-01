@@ -146,7 +146,22 @@ def df_to_picks(df: pd.DataFrame) -> list:
             "k_pct_vs": (float(row.get("K_Pct_vs")) if pd.notna(row.get("K_Pct_vs")) else None),
             "ab_vs": (int(float(row.get("AB_vs"))) if pd.notna(row.get("AB_vs")) else None),
             # v2 features
-            "park_factor": int(row.get("park_factor", 100)),
+            #
+            # park_factor: the live per-team/per-stat multiplier that was
+            # actually baked into AI_Proj (scanner.py's PF_Mult, from
+            # mlb_context.py's table, applied pre-line alongside wind/PA
+            # adjustments). Previously this field came from a *different*,
+            # static "2024-2025 seasons" table in features/park_factors.py
+            # that only ever fed the internal v2_score ranking multiplier —
+            # never AI_Proj — so the badge shown to users didn't match the
+            # number that actually shaped their projection. Falls back to
+            # the pipeline's neutral 100 for non-MLB sports / rows without
+            # a live PF_Mult (indoor sports, or if scanner.py's game-context
+            # fetch failed for that slate).
+            "park_factor": (
+                round(float(row.get("PF_Mult")) * 100)
+                if pd.notna(row.get("PF_Mult")) else int(row.get("park_factor", 100))
+            ),
             "fatigue_score": int(row.get("fatigue_score", 0)),
             "weather_adj": float(row.get("weather_adj", 1.0)),
             "umpire_adj": float(row.get("umpire_adj", 1.0)),
