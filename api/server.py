@@ -183,9 +183,16 @@ def df_to_picks(df: pd.DataFrame) -> list:
             "is_demon": bool(row.get("Is_Demon", False)),
             "model_prob": model_prob,
             "grade": gg,
-            # SHARP: backtested edge bucket. K/OUTS with |edge|>=2 hit ~88%
-            # out-of-sample (vs 64% naive Under baseline). This is the only
-            # bucket that beats the structural Under bias by a real margin.
+            # SHARP: in live practice this bucket is ~99% goblin-Over picks
+            # (standard-Under K/OUTS at this edge threshold almost never
+            # clears the board — n=4 across 2 months of production, not a
+            # usable sample). Live-validated number: goblin-Over K/OUTS,
+            # edge>=2, hit 81.4% (n=533, graded 2026-05-31 to 2026-07-31,
+            # post-regrade). The "~88% out-of-sample" figure previously
+            # cited here for a blended standard+goblin bucket was an
+            # unsourced backtest claim with no linked script or data in
+            # this repo and no live sample behind its standard-Under half —
+            # removed 2026-08-01, see memory: tankd-sharp-bucket-validation.
             "sharp": (
                 str(row.get("Stat","")).upper() in ("K","OUTS")
                 and pd.notna(row.get("AI_Proj")) and pd.notna(row.get("PP_Line"))
