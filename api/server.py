@@ -145,6 +145,14 @@ def df_to_picks(df: pd.DataFrame) -> list:
             "avg_vs": (float(row.get("AVG_vs")) if pd.notna(row.get("AVG_vs")) else None),
             "k_pct_vs": (float(row.get("K_Pct_vs")) if pd.notna(row.get("K_Pct_vs")) else None),
             "ab_vs": (int(float(row.get("AB_vs"))) if pd.notna(row.get("AB_vs")) else None),
+            # True = a real vs-hand statSplits result; False = MLB's statSplits
+            # endpoint was unavailable and ops_vs/avg_vs/k_pct_vs above are a
+            # season-aggregate fallback instead (see mlb_splits.get_todays_splits) —
+            # None when there's no matchup data at all. Previously computed
+            # (Split_Is_Live, scanner.py) but dropped before reaching the API,
+            # so the dashboard had no way to flag which matchup numbers were
+            # real platoon splits vs. season averages.
+            "split_is_live": (bool(row.get("Split_Is_Live")) if pd.notna(row.get("Split_Is_Live")) else None),
             # v2 features
             #
             # park_factor: the live per-team/per-stat multiplier that was
