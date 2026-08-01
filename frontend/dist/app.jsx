@@ -1,45 +1,5 @@
 const { useState, useMemo, useCallback, useEffect, useRef } = React;
 
-// ─── Mock Data ───────────────────────────────────────────────────────────────
-
-const MOCK_PICKS = {
-  MLB: [
-    { player: "Bobby Witt Jr.", team: "KC", stat_type: "Hits", side: "Over", line: 1.5, win_pct: 72, ai_proj: 2.1, score: 97, edge: 18.2, tier: "ELITE", l5: "100%", l5_frac: "5/5", l10: "90%", l10_frac: "9/10", park_factor: 103, fatigue_score: 15, weather_adj: 1.02, umpire_adj: 1.05, segment: "hitter" },
-    { player: "Shohei Ohtani", team: "LAD", stat_type: "Hits", side: "Over", line: 1.5, win_pct: 68, ai_proj: 1.9, score: 91, edge: 14.1, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "70%", l10_frac: "7/10", park_factor: 98, fatigue_score: 22, weather_adj: 1.0, umpire_adj: 0.98, segment: "hitter" },
-    { player: "Aaron Judge", team: "NYY", stat_type: "Hits", side: "Over", line: 0.5, win_pct: 82, ai_proj: 1.4, score: 88, edge: 12.0, tier: "FIRE", l5: "100%", l5_frac: "5/5", l10: "80%", l10_frac: "8/10", park_factor: 107, fatigue_score: 10, weather_adj: 1.01, umpire_adj: 1.02, segment: "hitter" },
-    { player: "Gunnar Henderson", team: "BAL", stat_type: "Hits", side: "Over", line: 1.5, win_pct: 64, ai_proj: 1.7, score: 84, edge: 10.5, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "60%", l10_frac: "6/10", park_factor: 101, fatigue_score: 18, weather_adj: 0.99, umpire_adj: 1.01, segment: "hitter" },
-    { player: "Corey Seager", team: "TEX", stat_type: "Hits", side: "Over", line: 0.5, win_pct: 78, ai_proj: 1.3, score: 82, edge: 9.8, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "90%", l10_frac: "9/10", park_factor: 105, fatigue_score: 25, weather_adj: 1.03, umpire_adj: 0.97, segment: "hitter" },
-    { player: "Mookie Betts", team: "LAD", stat_type: "Hits", side: "Over", line: 1.5, win_pct: 58, ai_proj: 1.6, score: 74, edge: 6.2, tier: "SOLID", l5: "60%", l5_frac: "3/5", l10: "50%", l10_frac: "5/10", park_factor: 98, fatigue_score: 30, weather_adj: 1.0, umpire_adj: 1.0, segment: "hitter" },
-    { player: "Rafael Devers", team: "BOS", stat_type: "Hits", side: "Over", line: 0.5, win_pct: 75, ai_proj: 1.2, score: 79, edge: 8.0, tier: "SOLID", l5: "80%", l5_frac: "4/5", l10: "70%", l10_frac: "7/10", park_factor: 104, fatigue_score: 12, weather_adj: 0.98, umpire_adj: 1.03, segment: "hitter" },
-    { player: "Trea Turner", team: "PHI", stat_type: "Hits", side: "Under", line: 1.5, win_pct: 62, ai_proj: 1.1, score: 71, edge: 5.5, tier: "SOLID", l5: "60%", l5_frac: "3/5", l10: "60%", l10_frac: "6/10", park_factor: 100, fatigue_score: 20, weather_adj: 1.01, umpire_adj: 0.99, segment: "hitter" },
-    { player: "Gerrit Cole", team: "NYY", stat_type: "Strikeouts", side: "Over", line: 6.5, win_pct: 70, ai_proj: 7.8, score: 94, edge: 16.0, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "80%", l10_frac: "8/10", park_factor: 107, fatigue_score: 10, weather_adj: 1.0, umpire_adj: 1.08, segment: "pitcher" },
-    { player: "Corbin Burns", team: "BAL", stat_type: "Strikeouts", side: "Over", line: 7.5, win_pct: 65, ai_proj: 8.2, score: 90, edge: 13.5, tier: "ELITE", l5: "60%", l5_frac: "3/5", l10: "70%", l10_frac: "7/10", park_factor: 101, fatigue_score: 15, weather_adj: 0.99, umpire_adj: 1.06, segment: "pitcher" },
-    { player: "Spencer Strider", team: "ATL", stat_type: "Strikeouts", side: "Over", line: 6.5, win_pct: 74, ai_proj: 8.0, score: 96, edge: 17.8, tier: "ELITE", l5: "100%", l5_frac: "5/5", l10: "90%", l10_frac: "9/10", park_factor: 99, fatigue_score: 8, weather_adj: 1.01, umpire_adj: 1.04, segment: "pitcher" },
-    { player: "Zack Wheeler", team: "PHI", stat_type: "Strikeouts", side: "Over", line: 5.5, win_pct: 68, ai_proj: 6.5, score: 85, edge: 11.2, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "60%", l10_frac: "6/10", park_factor: 100, fatigue_score: 20, weather_adj: 1.0, umpire_adj: 1.02, segment: "pitcher" },
-    { player: "Dylan Cease", team: "SD", stat_type: "Strikeouts", side: "Over", line: 7.5, win_pct: 55, ai_proj: 7.1, score: 72, edge: 5.8, tier: "SOLID", l5: "40%", l5_frac: "2/5", l10: "50%", l10_frac: "5/10", park_factor: 96, fatigue_score: 28, weather_adj: 1.0, umpire_adj: 0.98, segment: "pitcher" },
-    { player: "Logan Webb", team: "SF", stat_type: "Strikeouts", side: "Under", line: 6.5, win_pct: 60, ai_proj: 5.8, score: 76, edge: 7.0, tier: "SOLID", l5: "60%", l5_frac: "3/5", l10: "60%", l10_frac: "6/10", park_factor: 94, fatigue_score: 18, weather_adj: 0.97, umpire_adj: 0.95, segment: "pitcher" },
-    { player: "Yordan Alvarez", team: "HOU", stat_type: "Total Bases", side: "Over", line: 1.5, win_pct: 66, ai_proj: 2.3, score: 87, edge: 12.5, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "70%", l10_frac: "7/10", park_factor: 102, fatigue_score: 14, weather_adj: 1.0, umpire_adj: 1.0, segment: "hitter" },
-    { player: "Juan Soto", team: "NYY", stat_type: "Total Bases", side: "Over", line: 2.5, win_pct: 52, ai_proj: 2.6, score: 68, edge: 4.2, tier: "VALUE", l5: "40%", l5_frac: "2/5", l10: "50%", l10_frac: "5/10", park_factor: 107, fatigue_score: 10, weather_adj: 1.01, umpire_adj: 1.02, segment: "hitter" },
-    { player: "Cole Ragans", team: "KC", stat_type: "Pitching Outs", side: "Over", line: 17.5, win_pct: 62, ai_proj: 18.5, score: 80, edge: 8.8, tier: "SOLID", l5: "60%", l5_frac: "3/5", l10: "70%", l10_frac: "7/10", park_factor: 103, fatigue_score: 12, weather_adj: 1.02, umpire_adj: 1.01, segment: "pitcher" },
-    { player: "Tarik Skubal", team: "DET", stat_type: "Pitching Outs", side: "Over", line: 18.5, win_pct: 70, ai_proj: 19.8, score: 92, edge: 14.0, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "80%", l10_frac: "8/10", park_factor: 97, fatigue_score: 10, weather_adj: 0.99, umpire_adj: 1.03, segment: "pitcher" },
-  ],
-  WNBA: [
-    { player: "A'ja Wilson", team: "LVA", stat_type: "Points", side: "Over", line: 22.5, win_pct: 75, ai_proj: 26.1, score: 95, edge: 16.0, tier: "ELITE", l5: "100%", l5_frac: "5/5", l10: "90%", l10_frac: "9/10", park_factor: 100, fatigue_score: 10, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Caitlin Clark", team: "IND", stat_type: "Points", side: "Over", line: 18.5, win_pct: 68, ai_proj: 21.4, score: 88, edge: 12.5, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "70%", l10_frac: "7/10", park_factor: 100, fatigue_score: 15, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Napheesa Collier", team: "MIN", stat_type: "Rebounds", side: "Over", line: 8.5, win_pct: 70, ai_proj: 10.2, score: 91, edge: 14.0, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "80%", l10_frac: "8/10", park_factor: 100, fatigue_score: 12, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Sabrina Ionescu", team: "NYL", stat_type: "Assists", side: "Over", line: 5.5, win_pct: 64, ai_proj: 6.8, score: 83, edge: 10.0, tier: "FIRE", l5: "60%", l5_frac: "3/5", l10: "70%", l10_frac: "7/10", park_factor: 100, fatigue_score: 18, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Breanna Stewart", team: "NYL", stat_type: "Points", side: "Over", line: 19.5, win_pct: 66, ai_proj: 22.0, score: 86, edge: 11.2, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "60%", l10_frac: "6/10", park_factor: 100, fatigue_score: 20, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Kelsey Plum", team: "LVA", stat_type: "3-Pointers", side: "Over", line: 2.5, win_pct: 58, ai_proj: 3.1, score: 74, edge: 6.5, tier: "SOLID", l5: "60%", l5_frac: "3/5", l10: "50%", l10_frac: "5/10", park_factor: 100, fatigue_score: 14, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-  ],
-  NBA: [
-    { player: "Luka Doncic", team: "LAL", stat_type: "Points", side: "Over", line: 28.5, win_pct: 72, ai_proj: 32.0, score: 93, edge: 15.0, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "80%", l10_frac: "8/10", park_factor: 100, fatigue_score: 18, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Jayson Tatum", team: "BOS", stat_type: "Points", side: "Over", line: 26.5, win_pct: 66, ai_proj: 29.5, score: 87, edge: 11.8, tier: "FIRE", l5: "60%", l5_frac: "3/5", l10: "70%", l10_frac: "7/10", park_factor: 100, fatigue_score: 15, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Nikola Jokic", team: "DEN", stat_type: "Rebounds", side: "Over", line: 12.5, win_pct: 70, ai_proj: 14.2, score: 90, edge: 13.5, tier: "ELITE", l5: "80%", l5_frac: "4/5", l10: "80%", l10_frac: "8/10", park_factor: 100, fatigue_score: 10, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Tyrese Haliburton", team: "IND", stat_type: "Assists", side: "Over", line: 9.5, win_pct: 68, ai_proj: 11.0, score: 89, edge: 12.0, tier: "FIRE", l5: "80%", l5_frac: "4/5", l10: "70%", l10_frac: "7/10", park_factor: 100, fatigue_score: 12, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-    { player: "Shai Gilgeous-Alexander", team: "OKC", stat_type: "Points", side: "Over", line: 30.5, win_pct: 60, ai_proj: 32.5, score: 82, edge: 9.0, tier: "FIRE", l5: "60%", l5_frac: "3/5", l10: "60%", l10_frac: "6/10", park_factor: 100, fatigue_score: 14, weather_adj: 1.0, umpire_adj: 1.0, segment: "player" },
-  ],
-};
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SPORTS = ["MLB"];
@@ -266,6 +226,31 @@ function confDisplay(mp) {
   return { tier, pct };
 }
 
+// Explicit failure state for a broken /api/picks fetch. Previously this
+// silently fell back to hardcoded mock picks (fake players, fake ELITE
+// tiers) with no indication they weren't real — for a props-betting
+// dashboard, showing nothing is safer than showing confident-looking fake
+// data with no way to tell the difference.
+function PicksErrorState({ sport, onRetry }) {
+  return (
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <div style={{ fontSize: 30, marginBottom: 12 }}>⚠️</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>
+        Couldn't load {sport} picks
+      </div>
+      <div style={{ fontSize: 12, color: C.textDim, marginBottom: 18, maxWidth: 300, marginLeft: "auto", marginRight: "auto" }}>
+        The picks API didn't respond. Nothing is shown rather than stale or placeholder data.
+      </div>
+      <button onClick={onRetry} style={{
+        padding: "8px 22px", borderRadius: 8, border: `1px solid ${C.line2}`,
+        background: "transparent", color: C.text, fontSize: 13, fontWeight: 600, cursor: "pointer",
+      }}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function TankdPicks() {
   const [sport, setSport] = useState("MLB");
   const [tab, setTab] = useState("Scanner");
@@ -280,11 +265,16 @@ function TankdPicks() {
 
   const [apiPicks, setApiPicks] = useState({});
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState({}); // { [sport]: true } on failure
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     setLoading(true);
     fetch("/api/picks/" + sport)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
       .then(data => {
         const transformed = (data.picks || []).map(p => ({
           ...p,
@@ -295,12 +285,18 @@ function TankdPicks() {
           segment: p.segment || (p.is_pitcher ? "pitcher" : "hitter"),
         }));
         setApiPicks(prev => ({ ...prev, [sport]: transformed }));
+        setFetchError(prev => ({ ...prev, [sport]: false }));
         setLoading(false);
       })
-      .catch(() => setLoading(false));
-  }, [sport]);
+      .catch(() => {
+        setFetchError(prev => ({ ...prev, [sport]: true }));
+        setLoading(false);
+      });
+  }, [sport, retryTick]);
 
-  const picks = apiPicks[sport] || MOCK_PICKS[sport] || [];
+  const picks = apiPicks[sport] || [];
+  const hasError = !!fetchError[sport] && !apiPicks[sport];
+  const retry = useCallback(() => setRetryTick(t => t + 1), []);
 
   // For MLB, filter by segment first
   const segmentPicks = (sport === "MLB"
@@ -417,22 +413,28 @@ function TankdPicks() {
 
       {/* ── Tab Content ──────────────────────────────────────────────────── */}
       <div style={{ flex: 1, padding: "0 12px", marginTop: 12 }}>
-        {tab === "Scanner" && (
-          <ScannerTab
-            sport={sport} segment={segment} setSegment={setSegment}
-            statTypes={statTypes} activeStatType={activeStatType} setStatType={setStatType}
-            lines={lines} activeLine={activeLine} setLine={setLine}
-            filtered={filtered} sortBy={sortBy} sortDir={sortDir} toggleSort={toggleSort} setSortBy={setSortBy} setSortDir={setSortDir}
-            gradeFilter={gradeFilter} setGradeFilter={setGradeFilter}
-            tierFilter={tierFilter} setTierFilter={setTierFilter}
-            addToBuilder={addToBuilder}
-          />
+        {hasError && !loading && (tab === "Scanner" || tab === "Sharp") ? (
+          <PicksErrorState sport={sport} onRetry={retry} />
+        ) : (
+          <>
+            {tab === "Scanner" && (
+              <ScannerTab
+                sport={sport} segment={segment} setSegment={setSegment}
+                statTypes={statTypes} activeStatType={activeStatType} setStatType={setStatType}
+                lines={lines} activeLine={activeLine} setLine={setLine}
+                filtered={filtered} sortBy={sortBy} sortDir={sortDir} toggleSort={toggleSort} setSortBy={setSortBy} setSortDir={setSortDir}
+                gradeFilter={gradeFilter} setGradeFilter={setGradeFilter}
+                tierFilter={tierFilter} setTierFilter={setTierFilter}
+                addToBuilder={addToBuilder}
+              />
+            )}
+            {tab === "Sharp" && <SharpTab picks={picks} sport={sport} />}
+            {tab === "Builder" && (
+              <BuilderTab legs={builderLegs} removeLeg={removeFromBuilder} clearAll={() => setBuilderLegs([])} />
+            )}
+            {tab === "Moneylines" && <MoneylineTab />}
+          </>
         )}
-        {tab === "Sharp" && <SharpTab picks={picks} sport={sport} />}
-        {tab === "Builder" && (
-          <BuilderTab legs={builderLegs} removeLeg={removeFromBuilder} clearAll={() => setBuilderLegs([])} />
-        )}
-        {tab === "Moneylines" && <MoneylineTab />}
       </div>
 
       {/* ── Bottom Nav ───────────────────────────────────────────────────── */}
