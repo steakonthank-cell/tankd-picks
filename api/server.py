@@ -246,6 +246,8 @@ async def get_picks(sport: str, tier: str = None, min_score: float = 0):
         "sport": sport,
         "count": len(picks),
         "last_scan": _get_scan_time(sport.lower()),
+        "model_trained_at": _get_model_trained_at(sport.lower()),
+        "api_version": app.version,
         "picks": picks,
     }
 
@@ -348,6 +350,23 @@ def _get_scan_time(sport: str) -> str | None:
         mtime = csv_path.stat().st_mtime
         return datetime.fromtimestamp(mtime).isoformat()
     return None
+
+
+def _get_model_trained_at(sport: str) -> str | None:
+    """Latest trained_at across a sport's per-stat models (model_metrics.csv),
+    so the dashboard can show how stale the model weights are — separate from
+    last_scan, which only reflects when the (nightly-refreshed) input data
+    was last scored, not when the model itself was last retrained."""
+    metrics_path = BASE_DIR / "models" / sport.lower() / "model_metrics.csv"
+    if not metrics_path.exists():
+        return None
+    try:
+        df = pd.read_csv(metrics_path)
+        if "trained_at" not in df.columns or df.empty:
+            return None
+        return str(df["trained_at"].max())
+    except Exception:
+        return None
 
 
 # ─── Serve React frontend ───

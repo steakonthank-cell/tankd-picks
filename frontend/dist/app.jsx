@@ -118,6 +118,24 @@ function formatPF(pf) {
   return { txt: v.toFixed(2), neutral: Math.abs(v - 1) < 0.005 };
 }
 
+// Short "as of" stamp for the header \u2014 last_scan is when today's board was
+// scored; model_trained_at is when the underlying model weights were last
+// fit (data refreshes nightly, the model itself does not \u2014 these can and do
+// diverge by weeks).
+function formatAsOf(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function daysSince(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
 // Color a recent-form average by whether it clears the betting line.
 function formColor(val, line, side) {
   const v = parseFloat(val);
@@ -267,6 +285,7 @@ function TankdPicks() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState({}); // { [sport]: true } on failure
   const [retryTick, setRetryTick] = useState(0);
+  const [meta, setMeta] = useState({}); // { [sport]: { last_scan, model_trained_at, api_version } }
 
   useEffect(() => {
     setLoading(true);
@@ -286,6 +305,11 @@ function TankdPicks() {
         }));
         setApiPicks(prev => ({ ...prev, [sport]: transformed }));
         setFetchError(prev => ({ ...prev, [sport]: false }));
+        setMeta(prev => ({ ...prev, [sport]: {
+          last_scan: data.last_scan || null,
+          model_trained_at: data.model_trained_at || null,
+          api_version: data.api_version || null,
+        } }));
         setLoading(false);
       })
       .catch(() => {
@@ -297,6 +321,7 @@ function TankdPicks() {
   const picks = apiPicks[sport] || [];
   const hasError = !!fetchError[sport] && !apiPicks[sport];
   const retry = useCallback(() => setRetryTick(t => t + 1), []);
+  const activeMeta = meta[sport] || {};
 
   // For MLB, filter by segment first
   const segmentPicks = (sport === "MLB"
@@ -409,6 +434,26 @@ function TankdPicks() {
           </div>
         </div>
 
+        {(activeMeta.last_scan || activeMeta.model_trained_at) && (() => {
+          const modelDays = daysSince(activeMeta.model_trained_at);
+          const modelStale = modelDays != null && modelDays > 14;
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, fontSize: 10, color: C.textDim }}>
+              {activeMeta.last_scan && (
+                <span>Board as of {formatAsOf(activeMeta.last_scan)}</span>
+              )}
+              {activeMeta.model_trained_at && (
+                <span style={{ color: modelStale ? C.red : C.textDim }}>
+                  · Model trained {formatAsOf(activeMeta.model_trained_at)}
+                  {modelStale ? ` (${modelDays}d ago)` : ""}
+                </span>
+              )}
+              {activeMeta.api_version && (
+                <span style={{ marginLeft: "auto", fontFamily: FONT_MONO, opacity: 0.7 }}>v{activeMeta.api_version}</span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Tab Content ──────────────────────────────────────────────────── */}
