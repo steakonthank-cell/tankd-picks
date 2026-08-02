@@ -300,14 +300,24 @@ def _batter_splits(player_id: int, hand: str):
     real absence of stats on the board (e.g. everyday players silently
     showing blank vs-hand splits during an outage).
 
-    UPDATE 2026-07-04: statSplits now 406s unconditionally — confirmed across
-    multiple unrelated players (Tovar, Acuña, Judge, Witt Jr.) and every
-    param combination (with/without season, sportId, gameType). This is no
-    longer the "bursty transient" failure described above; it looks like a
-    sustained MLB-side change. get_todays_splits() now probes once before
-    committing to the full per-player retry loop, and falls back to season
-    aggregate stats (via _batter_season_fallback) when the endpoint is down,
-    instead of burning the full retry/backoff budget for a guaranteed 406.
+    UPDATE 2026-07-04: statSplits appeared to 406 unconditionally — confirmed
+    across multiple unrelated players (Tovar, Acuña, Judge, Witt Jr.) and
+    every param combination (with/without season, sportId, gameType). Read
+    at the time as a sustained MLB-side change, not the old "bursty
+    transient" failure described above.
+
+    CORRECTION 2026-08-02: "unconditional" was wrong — it was never tested
+    against enough distinct players to catch this. Direct testing today
+    (57 players, mix of known everyday names and a random sample from the
+    roster file) found ~7% (4/57) return real statSplits data on every
+    repeated call, consistently — not noise, a stable per-player split, same
+    shape as the gameLog degradation (see builder.py): most resources fail
+    and don't recover on retry, but a real minority work every time. The
+    2026-07-04 test just happened to sample four players that were all in
+    the failing majority. get_todays_splits() no longer short-circuits on a
+    single probe (see its own comment) — every batter gets a real attempt,
+    so the ~7% (and whatever that number does over time) show up as genuine
+    is_split=True instead of being discarded as a false full outage.
     """
     sit = 'vr' if hand == 'R' else 'vl'
     try:
@@ -541,33 +551,23 @@ def get_todays_splits(date_str: str = None) -> dict:
     result  = {}
     pending = list(batter_jobs)
 
-    # Circuit-breaker probe: a real statSplits outage 406s identically for
-    # every player/hand (confirmed 2026-07-04), so retrying the full batch
-    # SPLITS_MAX_ATTEMPTS times with backoff just burns ~45s for a guaranteed
-    # repeat failure. Probe with one lookup first — if it fails, skip straight
-    # to the season-stat fallback for everyone instead of grinding through
-    # retries that can't succeed. If it succeeds, the endpoint is healthy and
-    # we fall through to the normal per-batter retry loop unchanged (this
-    # still covers a genuinely transient 406 on an individual lookup).
-    if pending:
-        probe_pid, probe_pname, probe_hand = pending[0]
-        probe = _batter_splits(probe_pid, probe_hand)
-        if probe is None:
-            print("   MLB splits: statSplits endpoint appears down (probe 406'd) — "
-                  "using season-stat fallback for all batters instead of retrying")
-            _fill_season_fallback(pending, result)
-            pending = []
-        else:
-            pending = pending[1:]
-            if probe.get('ab'):
-                result[_normalize(probe_pname)] = {
-                    'avg':      probe['avg'],
-                    'ops':      probe['ops'],
-                    'ab':       probe['ab'],
-                    'k_pct':    probe['k_pct'],
-                    'hand':     probe_hand,
-                    'is_split': True,
-                }
+    # REMOVED 2026-08-02: this used to probe a single player and, on a 406,
+    # skip the entire per-batter loop and fall back to season-stats for
+    # EVERY batter — built on the 2026-07-04 assumption that statSplits 406s
+    # identically for every player/hand. Directly tested that assumption
+    # today: 4/57 sampled players (~7%) return real statSplits data on every
+    # repeated call, consistently — not a transient blip, a stable per-player
+    # split (same shape as the gameLog degradation: some resources work,
+    # most don't, and it doesn't change on retry). A single-player probe has
+    # a ~93% chance of hitting a failing player and wrongly declaring the
+    # whole endpoint dead, discarding real data for the working minority
+    # every single day. Removed the shortcut — every batter now gets a real
+    # attempt through the loop below, which already tags each one correctly
+    # (is_split=True on success, is_split=False via _fill_season_fallback
+    # once its own retries are exhausted). Worst case if the endpoint really
+    # is fully down: the ~45s described above, bounded by SPLITS_MAX_ATTEMPTS
+    # / SPLITS_RETRY_CAP — an acceptable cost for accurate is_split on the
+    # ~7% (and rising, if MLB's restriction keeps easing) who do work.
 
     for attempt in range(SPLITS_MAX_ATTEMPTS):
         if not pending:
