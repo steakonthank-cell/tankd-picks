@@ -21,13 +21,20 @@
 # is loud instead of silently eating a day (or 20 hours) of runtime.
 #
 # TIMEOUT_MINUTES: historical "Done" runs in refresh_training_data.log range
-# 29,002s-86,612s (8.1h-24.1h, median 8.8h) -- healthy runs routinely take
-# most of a day, not "well under an hour" as an earlier draft of this
-# comment assumed (that number was never checked against the actual log and
-# would have killed every single run, healthy or not). Set to 18h: comfortably
-# above the slowest run that still finished on its own, but with enough
+# 29,002s-86,612s (8.1h-24.1h, median 8.8h) -- those were all full re-pulls
+# (builder.py's only mode until 2026-08-02). Set to 18h: comfortably above
+# the slowest full run that ever finished on its own, but with enough
 # margin before the next 24h cron fire (0 4 * 3-10 *) that a timed-out run
 # can't still be exiting when the next one starts.
+#
+# UPDATE 2026-08-02: builder.py now defaults to incremental (current-season
+# only for players already on file), so the nightly invocation below should
+# normally finish in minutes, not hours -- 18h stays as the safety ceiling
+# for both modes rather than being tuned down for the common case, since a
+# tighter incremental-specific timeout isn't worth the added complexity and
+# 18h already catches a genuinely stuck run either way. The monthly
+# reconciliation entry (--full, see crontab) is the one expected to
+# actually use most of this budget.
 #
 # LOCK_FILE: flock -n so a run that's still going (whether mid-timeout-window
 # or, if the timeout is ever disabled/changed, genuinely overrun) can't get a
@@ -63,7 +70,7 @@ alert() {
 }
 
 START_TS=$(date +%s)
-timeout "${TIMEOUT_MINUTES}m" .venv/bin/python scripts/refresh_training_data.py >> "$LOG" 2>&1
+timeout "${TIMEOUT_MINUTES}m" .venv/bin/python scripts/refresh_training_data.py "$@" >> "$LOG" 2>&1
 EXIT_CODE=$?
 ELAPSED_MIN=$(( ($(date +%s) - START_TS) / 60 ))
 

@@ -51,19 +51,42 @@ Failure vs. confirmed-zero (2026-07-28 incident):
     replacing it outright, so a degraded run can only add data, never erase
     it silently.
 
+Incremental fetch (added 2026-08-02):
+    Every fetch_*_logs() call used to re-pull all of SEASONS (2022-2026, 5
+    seasons) for every player, every night -- 6,590 API calls regardless of
+    what had actually changed since yesterday. That was the real driver of
+    the 8-24h nightly runtime, not just the degraded-endpoint backoff cost:
+    closed seasons (everything before SEASONS[-1]) never change once the
+    season ends, so re-fetching them nightly for a player already on file
+    was pure waste. fetch_batting_logs()/fetch_pitching_logs() now default
+    to incremental=True: for any player with existing rows in a closed
+    season (see _closed_season_keys), only the current season is re-fetched;
+    a player with no history at all (a call-up) still gets a full 5-season
+    backfill, same as before. Steady-state call volume drops from ~6,590 to
+    roughly ~1,330 (current season only) plus backfill for new players.
+
+    Rare retroactive corrections to closed-season data (a postponed game
+    reclassified, an official scorer correction) won't be caught by the
+    incremental path. Call with incremental=False (or `--full` from the
+    CLI) for a full re-pull -- intended to run as a separate, infrequent
+    (monthly) cron entry, not nightly.
+
 Usage:
-    $ python3 -m src.sports.mlb.builder
+    $ python3 -m src.sports.mlb.builder            # incremental (default)
+    $ python3 -m src.sports.mlb.builder --full      # full re-pull, all seasons
 
 Performance:
-    ~10-15 minutes first run (thousands of API calls with rate limiting) —
-    can run considerably longer if the API is rate-limiting this IP (seen
-    in practice: live HTTP 406s from statsapi.mlb.com mid-run), in which
-    case the retry backoff in _get() eats most of the extra time.
+    Incremental, healthy endpoint: low single-digit minutes (~1,330 calls).
+    Incremental, degraded endpoint: worst case well under an hour with the
+    current _get() backoff (see its docstring for why long backoff was
+    removed). Full re-pull (--full or incremental=False): back to the old
+    ~10-15 minute healthy-case / many-hours degraded-case profile, since
+    it's making the full 6,590-call sweep again -- expected for the monthly
+    reconciliation pass, not a regression.
     Checkpointing means a second run after a kill only has to redo whatever
     wasn't marked done yet, not everything. During a sustained degradation
-    (see above) most player-seasons will fail no matter how long this runs
-    -- that's expected and handled by the merge logic, not a sign to retry
-    harder.
+    most player-seasons will fail no matter how long this runs -- that's
+    expected and handled by the merge logic, not a sign to retry harder.
 """
 
 import requests
@@ -87,12 +110,26 @@ PITCHING_FILE = os.path.join(RAW_DIR, 'pitching_logs.csv')
 FAILED = object()
 
 
-def _get(url, params=None, retries=4):
+def _get(url, params=None, retries=2):
     """Returns parsed JSON on 200, None on a confirmed 404 (real 'not
     found', safe to treat as no data), or FAILED if every attempt failed
     without a definitive answer (network error, timeout, or any other
     non-200/404 status like the 406s seen during the statSplits/gameLog
-    degradation) -- callers must NOT treat FAILED as "no data"."""
+    degradation) -- callers must NOT treat FAILED as "no data".
+
+    retries/backoff fixed 2026-08-02: was 4 attempts with backoff up to
+    2/4/8s (~14.6s total per failed call) on the assumption that a failing
+    call needed time to recover. Directly tested that assumption against
+    both this endpoint and statSplits: retrying the same failing resource
+    after a 0.1-2s pause recovered 0/38 and 0/6 sampled cases respectively
+    -- the failures seen during the 2026-08 degradation are stable
+    per-(player,season) outcomes, not transient blips that clear on a
+    short wait. Backoff that long was pure cost with no recovery benefit
+    and was the dominant driver of the 8-24h nightly runtimes (6,590 calls
+    x ~66% failure x ~14.6s backoff ~= the observed 17.7h). Cut to 2 total
+    attempts, 0.5s apart -- enough to catch a genuine one-off network
+    hiccup without paying exponential backoff for calls that were never
+    going to succeed on retry."""
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, timeout=20)
@@ -103,7 +140,7 @@ def _get(url, params=None, retries=4):
         except Exception:
             pass
         if attempt < retries - 1:
-            time.sleep(min(2 * (2 ** attempt), 16))
+            time.sleep(0.5)
     return FAILED
 
 
@@ -204,6 +241,33 @@ def _clear_checkpoint(final_path):
             os.remove(p)
 
 
+def _closed_season_keys(final_path):
+    """(player_id, season) keys already on file for seasons strictly before
+    the current one (SEASONS[-1]). Closed seasons never change once the
+    season ends, so a nightly refresh doesn't need to re-fetch them for a
+    player it already has -- only the current season, plus full backfill
+    for a player with no history at all yet (a call-up), need a real API
+    call. This is the incremental-fetch design added 2026-08-02: the old
+    behavior re-pulled all of SEASONS for every player every night (6,590
+    calls), which was the actual driver of the 8-24h nightly runtime, not
+    just the degraded-endpoint backoff cost.
+
+    Keyed off the existing MERGED file (not the in-run checkpoint), since
+    this is a cross-night skip decision, not a same-run resume. Row-count
+    completeness isn't re-validated here -- if a key exists at all for a
+    closed season, it's trusted, matching how _merge_and_save's own
+    confirmed/preserved split already works.
+    """
+    if not os.path.exists(final_path):
+        return set()
+    try:
+        existing = pd.read_csv(final_path, usecols=['player_id', 'season'], low_memory=False)
+    except Exception:
+        return set()
+    closed = existing[existing['season'] < SEASONS[-1]]
+    return set(closed['player_id'].astype(str) + ':' + closed['season'].astype(str))
+
+
 def _merge_and_save(final_path, new_rows, confirmed_keys, label):
     """Merge this run's rows onto the existing file by (player_id, season)
     instead of overwriting it outright. Only player-seasons in
@@ -241,7 +305,7 @@ def _merge_and_save(final_path, new_rows, confirmed_keys, label):
     return merged
 
 
-def fetch_batting_logs(resume=True):
+def fetch_batting_logs(resume=True, incremental=True):
     os.makedirs(RAW_DIR, exist_ok=True)
     print(f"\n--- DOWNLOADING BATTING LOGS ({min(SEASONS)}-{max(SEASONS)}) ---", flush=True)
 
@@ -254,8 +318,22 @@ def fetch_batting_logs(resume=True):
     if batters:
         probe_gamelog_health(batters[0]['id'], SEASONS[-1], 'hitting')
 
+    already_have = _closed_season_keys(BATTING_FILE) if incremental else set()
+
     all_rows, done = (_load_checkpoint(BATTING_FILE) if resume else ([], set()))
-    total = len(batters) * len(SEASONS)
+    # Real calls this run = every (player, current season) pair, plus any
+    # (player, closed season) pair not already covered by already_have --
+    # i.e. new call-ups needing a full historical backfill. See
+    # _closed_season_keys for why closed seasons are otherwise skipped.
+    to_fetch = [(season, player) for season in SEASONS for player in batters
+                if not (incremental and season != SEASONS[-1]
+                        and f"{player['id']}:{season}" in already_have)]
+    skipped_incremental = len(batters) * len(SEASONS) - len(to_fetch)
+    total = len(to_fetch)
+    if incremental and skipped_incremental:
+        print(f"   Incremental: skipping {skipped_incremental:,} closed-season "
+              f"player-seasons already on file, fetching {total:,} this run "
+              f"(current season for everyone + full backfill for new players)", flush=True)
     processed = len(done)
     since_checkpoint = 0
     failed_count = 0
@@ -265,6 +343,8 @@ def fetch_batting_logs(resume=True):
         for player in batters:
             key = f"{player['id']}:{season}"
             if key in done:
+                continue
+            if incremental and season != SEASONS[-1] and key in already_have:
                 continue
 
             processed += 1
@@ -327,7 +407,7 @@ def fetch_batting_logs(resume=True):
     return merged
 
 
-def fetch_pitching_logs(resume=True):
+def fetch_pitching_logs(resume=True, incremental=True):
     os.makedirs(RAW_DIR, exist_ok=True)
     print(f"\n--- DOWNLOADING PITCHING LOGS ({min(SEASONS)}-{max(SEASONS)}) ---", flush=True)
 
@@ -340,8 +420,18 @@ def fetch_pitching_logs(resume=True):
     if pitchers:
         probe_gamelog_health(pitchers[0]['id'], SEASONS[-1], 'pitching')
 
+    already_have = _closed_season_keys(PITCHING_FILE) if incremental else set()
+
     all_rows, done = (_load_checkpoint(PITCHING_FILE) if resume else ([], set()))
-    total = len(pitchers) * len(SEASONS)
+    to_fetch = [(season, player) for season in SEASONS for player in pitchers
+                if not (incremental and season != SEASONS[-1]
+                        and f"{player['id']}:{season}" in already_have)]
+    skipped_incremental = len(pitchers) * len(SEASONS) - len(to_fetch)
+    total = len(to_fetch)
+    if incremental and skipped_incremental:
+        print(f"   Incremental: skipping {skipped_incremental:,} closed-season "
+              f"player-seasons already on file, fetching {total:,} this run "
+              f"(current season for everyone + full backfill for new players)", flush=True)
     processed = len(done)
     since_checkpoint = 0
     failed_count = 0
@@ -351,6 +441,8 @@ def fetch_pitching_logs(resume=True):
         for player in pitchers:
             key = f"{player['id']}:{season}"
             if key in done:
+                continue
+            if incremental and season != SEASONS[-1] and key in already_have:
                 continue
 
             processed += 1
@@ -407,11 +499,13 @@ def fetch_pitching_logs(resume=True):
 
 
 if __name__ == "__main__":
+    import sys
+    full = "--full" in sys.argv
     print("=" * 55)
-    print("   ⚾ MLB DATA BUILDER")
+    print("   ⚾ MLB DATA BUILDER" + ("  (FULL RE-PULL)" if full else "  (incremental)"))
     print("=" * 55)
-    fetch_batting_logs()
-    fetch_pitching_logs()
+    fetch_batting_logs(incremental=not full)
+    fetch_pitching_logs(incremental=not full)
     print("\n" + "=" * 55)
     print("✅  BUILD COMPLETE")
     print("   Next: Run features.py → train.py")

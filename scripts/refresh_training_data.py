@@ -5,10 +5,14 @@ Two stages, run in sequence (mirrors src/cli/mlb_cli.py's "Build Data" then
 "Engineer Features" menu options — same underlying functions, just chained
 non-interactively for cron):
 
-  1. src.sports.mlb.builder — re-downloads batter/pitcher game logs from the
-     MLB Stats API (full re-pull across all tracked seasons, not
-     incremental; this is the existing script's only mode) into
-     data/mlb/raw/{batting,pitching}_logs.csv.
+  1. src.sports.mlb.builder — downloads batter/pitcher game logs from the
+     MLB Stats API into data/mlb/raw/{batting,pitching}_logs.csv. Defaults
+     to incremental (added 2026-08-02): only the current season is
+     re-fetched for players already on file, full backfill for new ones —
+     see builder.py's module docstring. Pass --full on this script's own
+     command line for an occasional full re-pull of every tracked season
+     (intended as a separate monthly cron entry, not the nightly default —
+     see the reconciliation entry in the crontab).
   2. src.sports.mlb.features — rebuilds the rolling-average training CSVs
      (data/mlb/processed/{batter,pitcher}_training.csv) from those raw logs.
      Pure pandas, no network calls, fast.
@@ -31,7 +35,9 @@ unique-player count dropped by more than SANITY_DROP_THRESHOLD vs. the
 backup, the backup is restored (the bad rebuild is discarded) and an alert
 is sent to Discord instead of silently shipping a thinner file.
 
-Usage: .venv/bin/python scripts/refresh_training_data.py
+Usage:
+    .venv/bin/python scripts/refresh_training_data.py            # incremental
+    .venv/bin/python scripts/refresh_training_data.py --full     # full re-pull
 """
 import sys
 import os
@@ -75,8 +81,10 @@ def _alert_discord(message):
 
 
 def main():
+    full = "--full" in sys.argv
     started = datetime.now(_ET)
-    print(f"=== Training data refresh starting {started.strftime('%Y-%m-%d %H:%M:%S %Z')} ===")
+    mode = "FULL RE-PULL" if full else "incremental"
+    print(f"=== Training data refresh starting {started.strftime('%Y-%m-%d %H:%M:%S %Z')} ({mode}) ===")
 
     before = {name: _counts(path) for name, path in PROCESSED_FILES.items()}
     backups = {}
@@ -86,10 +94,10 @@ def main():
             shutil.copy2(path, backup_path)
             backups[name] = backup_path
 
-    print("\n--- Stage 1/2: downloading game logs (src.sports.mlb.builder) ---")
+    print(f"\n--- Stage 1/2: downloading game logs (src.sports.mlb.builder, {mode}) ---")
     from src.sports.mlb.builder import fetch_batting_logs, fetch_pitching_logs
-    fetch_batting_logs()
-    fetch_pitching_logs()
+    fetch_batting_logs(incremental=not full)
+    fetch_pitching_logs(incremental=not full)
 
     print("\n--- Stage 2/2: building rolling-average features (src.sports.mlb.features) ---")
     from src.sports.mlb.features import main as features_main
