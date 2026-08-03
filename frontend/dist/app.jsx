@@ -885,9 +885,15 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
               <div style={{ flex: 1, background: C.card2, padding: "9px 4px" }}>
                 <StatCell value={pick.l10} frac={pick.l10_frac} label="L10" line={pick.line} side={pick.side} />
               </div>
-              <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center", opacity: pick.split_is_live === false ? 0.55 : 1 }}>
-                <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>
-                  OPS vs{pick.split_is_live === false && <span title="Season average — live vs-hand splits unavailable"> · szn</span>}
+              <div style={{
+                flex: 1, padding: "9px 4px", textAlign: "center",
+                background: pick.split_is_live === true ? C.goldBg : C.card2,
+                boxShadow: pick.split_is_live === true ? `inset 0 0 0 1px ${C.goldD}` : "none",
+                opacity: pick.split_is_live === false ? 0.55 : 1,
+              }}>
+                <div style={{ fontSize: 9, color: pick.split_is_live === true ? C.gold : C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: pick.split_is_live === true ? 800 : 600 }}>
+                  {pick.split_is_live === true && pick.pitch_hand ? `OPS vs ${pick.pitch_hand}HP · live` : "OPS vs"}
+                  {pick.split_is_live === false && <span title="Season average — live vs-hand splits unavailable"> · szn</span>}
                 </div>
                 <div style={{ color: pick.ops_vs == null ? C.textDim : (pick.ops_vs >= 0.800 ? C.green : pick.ops_vs <= 0.600 ? C.red : C.text), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
                   {pick.ops_vs != null ? pick.ops_vs.toFixed(3) : "—"}
@@ -898,9 +904,15 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                     thin any given row's sample is instead of hiding it. */}
                 {pick.ab_vs != null && <div style={{ color: C.textDim, fontSize: 9, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{pick.ab_vs} PA</div>}
               </div>
-              <div style={{ flex: 1, background: C.card2, padding: "9px 4px", textAlign: "center", opacity: pick.split_is_live === false ? 0.55 : 1 }}>
-                <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>
-                  BA vs{pick.split_is_live === false && <span title="Season average — live vs-hand splits unavailable"> · szn</span>}
+              <div style={{
+                flex: 1, padding: "9px 4px", textAlign: "center",
+                background: pick.split_is_live === true ? C.goldBg : C.card2,
+                boxShadow: pick.split_is_live === true ? `inset 0 0 0 1px ${C.goldD}` : "none",
+                opacity: pick.split_is_live === false ? 0.55 : 1,
+              }}>
+                <div style={{ fontSize: 9, color: pick.split_is_live === true ? C.gold : C.textDim, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1, fontWeight: pick.split_is_live === true ? 800 : 600 }}>
+                  {pick.split_is_live === true && pick.pitch_hand ? `BA vs ${pick.pitch_hand}HP · live` : "BA vs"}
+                  {pick.split_is_live === false && <span title="Season average — live vs-hand splits unavailable"> · szn</span>}
                 </div>
                 <div style={{ color: pick.avg_vs == null ? C.textDim : (pick.avg_vs >= 0.300 ? C.green : pick.avg_vs <= 0.220 ? C.red : C.text), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
                   {pick.avg_vs != null ? pick.avg_vs.toFixed(3).replace(/^0/, "") : "—"}
@@ -944,20 +956,44 @@ function ScannerTab({ sport, segment, setSegment, statTypes, activeStatType, set
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 8 }}>
                   {pick.ops_vs != null && (
-                    <div style={{ background: "rgba(100,116,139,0.08)", borderRadius: 8, padding: "6px 8px", textAlign: "center", opacity: pick.split_is_live === false ? 0.55 : 1 }}>
-                      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>OPS vs{pick.split_is_live === false ? " · szn" : ""}</div>
+                    <div style={{
+                      borderRadius: 8, padding: "6px 8px", textAlign: "center",
+                      background: pick.split_is_live === true ? C.goldBg : "rgba(100,116,139,0.08)",
+                      boxShadow: pick.split_is_live === true ? `inset 0 0 0 1px ${C.goldD}` : "none",
+                      opacity: pick.split_is_live === false ? 0.55 : 1,
+                    }}>
+                      <div style={{ fontSize: 9, color: pick.split_is_live === true ? C.gold : C.textDim, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: pick.split_is_live === true ? 800 : 400 }}>
+                        {pick.split_is_live === true && pick.pitch_hand ? `OPS vs ${pick.pitch_hand}HP · live` : "OPS vs"}
+                        {pick.split_is_live === false ? " · szn" : ""}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: pick.ops_vs >= 0.800 ? C.green : pick.ops_vs <= 0.600 ? C.red : C.text }}>{pick.ops_vs.toFixed(3)}</div>
                     </div>
                   )}
                   {pick.avg_vs != null && (
-                    <div style={{ background: "rgba(100,116,139,0.08)", borderRadius: 8, padding: "6px 8px", textAlign: "center", opacity: pick.split_is_live === false ? 0.55 : 1 }}>
-                      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>BA vs{pick.split_is_live === false ? " · szn" : ""}</div>
+                    <div style={{
+                      borderRadius: 8, padding: "6px 8px", textAlign: "center",
+                      background: pick.split_is_live === true ? C.goldBg : "rgba(100,116,139,0.08)",
+                      boxShadow: pick.split_is_live === true ? `inset 0 0 0 1px ${C.goldD}` : "none",
+                      opacity: pick.split_is_live === false ? 0.55 : 1,
+                    }}>
+                      <div style={{ fontSize: 9, color: pick.split_is_live === true ? C.gold : C.textDim, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: pick.split_is_live === true ? 800 : 400 }}>
+                        {pick.split_is_live === true && pick.pitch_hand ? `BA vs ${pick.pitch_hand}HP · live` : "BA vs"}
+                        {pick.split_is_live === false ? " · szn" : ""}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: pick.avg_vs >= 0.300 ? C.green : pick.avg_vs <= 0.220 ? C.red : C.text }}>{pick.avg_vs.toFixed(3).replace(/^0/, "")}</div>
                     </div>
                   )}
                   {pick.k_pct_vs != null && (
-                    <div style={{ background: "rgba(100,116,139,0.08)", borderRadius: 8, padding: "6px 8px", textAlign: "center", opacity: pick.split_is_live === false ? 0.55 : 1 }}>
-                      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>K% vs{pick.split_is_live === false ? " · szn" : ""}</div>
+                    <div style={{
+                      borderRadius: 8, padding: "6px 8px", textAlign: "center",
+                      background: pick.split_is_live === true ? C.goldBg : "rgba(100,116,139,0.08)",
+                      boxShadow: pick.split_is_live === true ? `inset 0 0 0 1px ${C.goldD}` : "none",
+                      opacity: pick.split_is_live === false ? 0.55 : 1,
+                    }}>
+                      <div style={{ fontSize: 9, color: pick.split_is_live === true ? C.gold : C.textDim, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: pick.split_is_live === true ? 800 : 400 }}>
+                        {pick.split_is_live === true && pick.pitch_hand ? `K% vs ${pick.pitch_hand}HP · live` : "K% vs"}
+                        {pick.split_is_live === false ? " · szn" : ""}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: pick.k_pct_vs >= 25 ? C.red : pick.k_pct_vs <= 15 ? C.green : C.text }}>{pick.k_pct_vs}%</div>
                     </div>
                   )}
@@ -1078,6 +1114,12 @@ function SharpTab({ picks, sport }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontWeight: 700, fontSize: 14 }}>{p.player}</span>
+                      {p.pitcher_hand && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 4,
+                          background: C.goldBg, color: C.gold,
+                        }}>{p.pitcher_hand}HP</span>
+                      )}
                       <span style={{
                         fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 4,
                         background: p.is_goblin ? "rgba(168,85,247,0.2)" : "rgba(100,116,139,0.2)",
@@ -1255,9 +1297,12 @@ function BuilderTab({ legs, removeLeg, clearAll, picks = [], addToBuilder }) {
                     <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.player}</div>
                     <div style={{ fontSize: 10, color: C.textDim }}>
                       {p.side} {p.line}
-                      {p.ops_vs != null ? " · OPS " + p.ops_vs.toFixed(3) : ""}
-                      {p.avg_vs != null ? " · BA " + p.avg_vs.toFixed(3).replace(/^0/, "") : ""}
-                      {p.k_pct_vs != null ? " · K% " + p.k_pct_vs : ""}
+                      <span style={{ color: p.split_is_live === true ? C.gold : "inherit", fontWeight: p.split_is_live === true ? 700 : 400 }}>
+                        {p.ops_vs != null ? " · OPS " + p.ops_vs.toFixed(3) : ""}
+                        {p.avg_vs != null ? " · BA " + p.avg_vs.toFixed(3).replace(/^0/, "") : ""}
+                        {p.k_pct_vs != null ? " · K% " + p.k_pct_vs : ""}
+                      </span>
+                      {p.split_is_live === true && p.pitch_hand ? ` (v${p.pitch_hand}HP)` : ""}
                       {p.split_is_live === false && (p.ops_vs != null || p.avg_vs != null || p.k_pct_vs != null) ? " (szn)" : ""}
                     </div>
                   </div>
