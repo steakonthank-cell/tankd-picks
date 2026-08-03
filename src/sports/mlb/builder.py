@@ -100,6 +100,17 @@ BASE_URL = "https://statsapi.mlb.com/api/v1"
 SEASONS  = [2022, 2023, 2024, 2025, 2026]
 CHECKPOINT_EVERY = 50  # player-season units between checkpoint saves
 
+# Alert threshold for this run's gameLog failure rate. The 2026-07-28
+# incident's fix (merge-not-overwrite) stops a degraded endpoint from
+# erasing data, but a run can still fail the large majority of its calls
+# and go nearly empty for the newest day's games without tripping the
+# separate row/player-count sanity floor in refresh_training_data.py
+# (that floor only fires on a >50% *aggregate* drop, which a mostly-stale
+# merge won't produce). 30% is well above single-player-hiccup noise but
+# catches the kind of endpoint-wide degradation seen on 2026-08-03 (97%
+# pitcher failure rate) long before it silently erodes coverage.
+FAILURE_ALERT_THRESHOLD = 0.30
+
 BASE_DIR     = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 RAW_DIR      = os.path.join(BASE_DIR, 'data', 'mlb', 'raw')
 BATTING_FILE  = os.path.join(RAW_DIR, 'batting_logs.csv')
@@ -108,6 +119,34 @@ PITCHING_FILE = os.path.join(RAW_DIR, 'pitching_logs.csv')
 # Sentinel distinguishing "API call never got a real answer" from a genuine
 # empty result. Never treat FAILED as "confirmed 0" -- see module docstring.
 FAILED = object()
+
+
+def _alert_discord(message):
+    """Same webhook/format as refresh_training_data.py's alert -- kept as a
+    local copy rather than a cross-import since that script imports *from*
+    this module, not the other way around."""
+    webhook = os.getenv("MLB_PITCHER_WEBHOOK")
+    if not webhook:
+        print("   (MLB_PITCHER_WEBHOOK not set in .env -- skipping Discord alert)", flush=True)
+        return
+    try:
+        requests.post(webhook, json={"content": message}, timeout=10)
+    except Exception as e:
+        print(f"   (Discord alert failed to send: {e})", flush=True)
+
+
+def _check_failure_rate(label, failed_count, total):
+    if not total:
+        return
+    rate = failed_count / total
+    if rate > FAILURE_ALERT_THRESHOLD:
+        print(f"   🚨 {label} gameLog failure rate {rate:.0%} ({failed_count}/{total}) "
+              f"exceeds the {FAILURE_ALERT_THRESHOLD:.0%} alert threshold this run.", flush=True)
+        _alert_discord(
+            f"🚨 MLB {label} gameLog fetch: {failed_count}/{total} ({rate:.0%}) failed this run "
+            f"— endpoint looks degraded. Existing data is preserved (not erased), but the newest "
+            f"day's coverage for most players may be thin/stale until this clears."
+        )
 
 
 def _get(url, params=None, retries=2):
@@ -402,6 +441,7 @@ def fetch_batting_logs(resume=True, incremental=True):
         print(f"   Season {season}: {season_rows:,} game rows", flush=True)
 
     print(f"   {failed_count} player-seasons failed this run (existing data preserved for those)", flush=True)
+    _check_failure_rate('batting', failed_count, total)
     merged = _merge_and_save(BATTING_FILE, all_rows, done, 'batting')
     _clear_checkpoint(BATTING_FILE)
     return merged
@@ -493,6 +533,7 @@ def fetch_pitching_logs(resume=True, incremental=True):
         print(f"   Season {season}: {season_rows:,} game rows", flush=True)
 
     print(f"   {failed_count} player-seasons failed this run (existing data preserved for those)", flush=True)
+    _check_failure_rate('pitching', failed_count, total)
     merged = _merge_and_save(PITCHING_FILE, all_rows, done, 'pitching')
     _clear_checkpoint(PITCHING_FILE)
     return merged

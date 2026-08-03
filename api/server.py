@@ -199,6 +199,7 @@ def df_to_picks(df: pd.DataFrame) -> list:
                 and abs(float(row.get("AI_Proj")) - float(row.get("PP_Line"))) >= 2.0
                 and not bool(row.get("Is_Demon", False))          # demons: fake edge, never sharp
                 and (not is_goblin or str(row.get("Side","")).title() == "Over")  # goblins: Over only
+                and gg != "SKIP"   # bust-gate: don't badge a pick the calibrated model itself rejects
             ),
         }
         picks.append(pick)

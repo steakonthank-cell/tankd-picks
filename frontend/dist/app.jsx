@@ -1048,7 +1048,7 @@ function SharpTab({ picks, sport }) {
           K / Outs props where the model disagrees with the line by 2+.
         </div>
         <div style={{ fontSize: 10, color: C.textDim, lineHeight: 1.5, marginTop: 4 }}>
-          81% over 32 backtested picks · last 14 days · small sample, will regress · goblin payouts reduced · not financial advice
+          81.4% over 533 backtested picks · goblin-Over K/OUTS, since 2026-05-31 · small sample, will regress · goblin payouts reduced · not financial advice
         </div>
       </div>
 
